@@ -34,5 +34,10 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
-
+    'woo' => [
+        'base'   => env('WOO_BASE_URL'),
+        'key'    => env('WOO_CONSUMER_KEY'),
+        'secret' => env('WOO_CONSUMER_SECRET'),
+        'per_page' => env('WOO_PER_PAGE', 100),
+    ],
 ];
