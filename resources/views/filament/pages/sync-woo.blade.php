@@ -9,14 +9,6 @@
             </x-filament::button>
         </div>
 
-        <div class="flex gap-3">
-            <x-filament::button color="warning" wire:click="debugProducts" icon="heroicon-o-bug-ant">
-                Debug Products (run now)
-            </x-filament::button>
-            <x-filament::button color="warning" wire:click="debugUsers" icon="heroicon-o-bug-ant">
-                Debug Users (run now)
-            </x-filament::button>
-        </div>
 
         <x-filament::section class="mt-6" heading="Notes">
             <ul class="list-disc ms-6 text-sm text-gray-600">

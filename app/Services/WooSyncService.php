@@ -80,33 +80,38 @@ class WooSyncService
     {
         $count = 0;
 
-        // Generate ONE random hash and reuse it for new users (fast)
-        $placeholderHash = Hash::make(Str::random(40));
+        $placeholderHash = \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40));
 
-        DB::transaction(function () use (&$count, $placeholderHash) {
+        \DB::transaction(function () use (&$count, $placeholderHash) {
             foreach ($this->client->pagedGet('/customers') as $c) {
                 $wcId  = (int) ($c['id'] ?? 0);
                 $email = strtolower((string) ($c['email'] ?? ''));
 
-                if ($email === '') continue;
+                if ($email === '') {
+                    continue;
+                }
 
-                $user = User::firstOrNew(['email' => $email]);
+                $user = \App\Models\User::firstOrNew(['email' => $email]);
 
-                $user->wc_id        = $wcId;
-                $user->first_name   = $c['first_name'] ?? $user->first_name;
-                $user->last_name    = $c['last_name']  ?? $user->last_name;
-                $user->name         = trim(($c['first_name'] ?? '').' '.($c['last_name'] ?? '')) ?: ($user->name ?? $email);
-                $user->phone        = data_get($c, 'billing.phone', $user->phone);
+                $user->wc_id       = $wcId;
+                $user->first_name  = $c['first_name'] ?? $user->first_name;
+                $user->last_name   = $c['last_name']  ?? $user->last_name;
+                $user->name        = trim(($c['first_name'] ?? '').' '.($c['last_name'] ?? '')) ?: ($user->name ?? $email);
+
+                // Billing info from Woo
+                $billing = $c['billing'] ?? [];
+                $user->phone                    = $billing['phone']     ?? $user->phone;
+                $user->billing_address_line1    = $billing['address_1'] ?? $user->billing_address_line1;
+                $user->billing_address_line2    = $billing['address_2'] ?? $user->billing_address_line2;
+                $user->billing_city             = $billing['city']      ?? $user->billing_city;
+                $user->billing_state            = $billing['state']     ?? $user->billing_state;
+                $user->billing_postcode         = $billing['postcode']  ?? $user->billing_postcode;
+                $user->billing_country          = $billing['country']   ?? $user->billing_country;
+
                 $user->wc_synced_at = now();
-                $user->address_line1 = data_get($c, 'billing.address_1', $user->address_line1);
-                $user->address_line2 = data_get($c, 'billing.address_2', $user->address_line2);
-                $user->city          = data_get($c, 'billing.city',       $user->city);
-                $user->state         = data_get($c, 'billing.state',      $user->state);
-                $user->postcode      = data_get($c, 'billing.postcode',   $user->postcode);
-                $user->country       = data_get($c, 'billing.country',    $user->country);
 
                 if (! $user->exists) {
-                    $user->password = $placeholderHash; // not used for login
+                    $user->password = $placeholderHash;
                 }
 
                 $user->save();
@@ -116,4 +121,5 @@ class WooSyncService
 
         return $count;
     }
+
 }

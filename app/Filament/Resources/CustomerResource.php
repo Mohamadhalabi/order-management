@@ -99,27 +99,32 @@ class CustomerResource extends Resource
             ]);
     }
 
-    public static function infolist(Infolist $infolist): Infolist
+    public static function infolist(\Filament\Infolists\Infolist $infolist): \Filament\Infolists\Infolist
     {
         return $infolist->schema([
-            Section::make('Customer')->schema([
-                TextEntry::make('name'),
-                TextEntry::make('email'),
-                TextEntry::make('phone'),
-                TextEntry::make('wc_id')->label('WooCommerce ID'),
-                TextEntry::make('wc_synced_at')->dateTime()->label('Synced At'),
-            ])->columns(2),
+            \Filament\Infolists\Components\Section::make('Customer')
+                ->schema([
+                    \Filament\Infolists\Components\TextEntry::make('name'),
+                    \Filament\Infolists\Components\TextEntry::make('email'),
+                    \Filament\Infolists\Components\TextEntry::make('phone'),
+                    \Filament\Infolists\Components\TextEntry::make('wc_id')->label('WooCommerce ID'),
+                    \Filament\Infolists\Components\TextEntry::make('wc_synced_at')->dateTime()->label('Synced At'),
+                    \Filament\Infolists\Components\TextEntry::make('created_at')->dateTime(),
+                    \Filament\Infolists\Components\TextEntry::make('updated_at')->dateTime(),
+                ])->columns(2),
 
-            Section::make('Billing address')->schema([
-                TextEntry::make('address_line1')->label('Line 1'),
-                TextEntry::make('address_line2')->label('Line 2'),
-                TextEntry::make('city'),
-                TextEntry::make('state')->label('State / Region'),
-                TextEntry::make('postcode')->label('Postcode'),
-                TextEntry::make('country')->label('Country'),
-            ])->columns(2),
+            \Filament\Infolists\Components\Section::make('Billing address')
+                ->schema([
+                    \Filament\Infolists\Components\TextEntry::make('billing_address_line1')->label('Line 1'),
+                    \Filament\Infolists\Components\TextEntry::make('billing_address_line2')->label('Line 2'),
+                    \Filament\Infolists\Components\TextEntry::make('billing_city')->label('City'),
+                    \Filament\Infolists\Components\TextEntry::make('billing_state')->label('State / Region'),
+                    \Filament\Infolists\Components\TextEntry::make('billing_postcode')->label('Postcode'),
+                    \Filament\Infolists\Components\TextEntry::make('billing_country')->label('Country'),
+                ])->columns(2),
         ]);
     }
+
 
     public static function getPages(): array
     {
