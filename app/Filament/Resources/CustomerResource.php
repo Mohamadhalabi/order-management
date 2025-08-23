@@ -24,10 +24,16 @@ class CustomerResource extends Resource
     protected static ?string $navigationLabel = 'Customers';
     protected static ?string $slug = 'customers';
 
+    public static function canViewAny(): bool
+    {
+        return auth()->user()?->hasAnyRole('admin', 'seller') ?? false;
+    }
+
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->hasRole('admin') ?? false;
+        return static::canViewAny();
     }
+
 
     /** Show only Woo customers (wc_id not null). Remove this if you want ALL users. */
     public static function getEloquentQuery(): Builder

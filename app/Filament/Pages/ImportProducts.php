@@ -17,9 +17,19 @@ class ImportProducts extends Page
 
     protected static ?string $navigationIcon  = 'heroicon-o-arrow-up-tray';
     protected static ?string $navigationGroup = 'Catalog';
-    protected static ?string $title = 'Import Products';
+    protected static ?string $title = 'Update Stock';
     protected static string $view = 'filament.pages.import-products';
 
+    public static function shouldRegisterNavigation(): bool
+    {
+        return auth()->user()?->hasAnyRole('admin') ?? false;
+    }
+
+    public static function canAccess(): bool
+    {
+        // Same check used when visiting the page URL directly
+        return static::shouldRegisterNavigation();
+    }
     // Keep form state untyped so Livewire is happy
     public array $data = [
         'file' => null,
@@ -47,13 +57,7 @@ class ImportProducts extends Page
                     // keep file in tmp so we get a TemporaryUploadedFile
                     ->storeFiles(false),
 
-                Forms\Components\Toggle::make('createNew')
-                    ->label('Create products that do not exist')
-                    ->default(true),
 
-                Forms\Components\Toggle::make('updateMeta')
-                    ->label('Update name/price/sale price/image when provided')
-                    ->default(true),
             ])
             ->statePath('data');
     }

@@ -16,8 +16,19 @@ class SellerPanelProvider extends PanelProvider
             ->login()
             ->authGuard('web')
 
-            // ✅ safely discover seller resources (no crash if none yet)
-            ->discoverResources(in: app_path('Filament/Seller/Resources'), for: 'App\\Filament\\Seller\\Resources')
+            // 👇 Share the same app resources/pages/widgets used by the admin panel
+            ->discoverResources(
+                in: app_path('Filament/Resources'),
+                for: 'App\\Filament\\Resources',
+            )
+            ->discoverPages(
+                in: app_path('Filament/Pages'),
+                for: 'App\\Filament\\Pages',
+            )
+            ->discoverWidgets(
+                in: app_path('Filament/Widgets'),
+                for: 'App\\Filament\\Widgets',
+            )
 
             ->middleware([
                 \Illuminate\Cookie\Middleware\EncryptCookies::class,
@@ -29,7 +40,7 @@ class SellerPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 FilamentAuthenticate::class,
-                'role:seller',
+                'role:seller', // only users with the "seller" role can access this panel
             ]);
     }
 }

@@ -14,10 +14,16 @@ class ProductResource extends Resource
     protected static ?string $navigationIcon = 'heroicon-o-cube';
     protected static ?string $navigationGroup = 'Catalog';
 
+    public static function canViewAny(): bool
+    {
+        return auth()->user()?->hasAnyRole('admin', 'seller') ?? false;
+    }
+
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->hasRole('admin') ?? false;
+        return static::canViewAny();
     }
+
 
     public static function form(Forms\Form $form): Forms\Form
     {

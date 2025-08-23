@@ -15,6 +15,18 @@ class SyncWoo extends Page
     protected static ?string $title = 'Woo Sync';
     protected static string $view = 'filament.pages.sync-woo';
 
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return auth()->user()?->hasAnyRole('admin') ?? false;
+    }
+
+    public static function canAccess(): bool
+    {
+        // Same check used when visiting the page URL directly
+        return static::shouldRegisterNavigation();
+    }
+
     // Original: queue jobs
     public function syncProducts(): void
     {
