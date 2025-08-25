@@ -11,8 +11,16 @@ use Filament\Tables;
 class ProductResource extends Resource
 {
     protected static ?string $model = Product::class;
-    protected static ?string $navigationIcon = 'heroicon-o-cube';
-    protected static ?string $navigationGroup = 'Catalog';
+
+    protected static ?string $navigationIcon  = 'heroicon-o-cube';
+    protected static ?string $navigationGroup = 'Katalog';
+    protected static ?string $navigationLabel = 'Ürünler';
+    protected static ?string $slug            = 'products';
+
+    // >>> these three make breadcrumbs/titles use TR <<<
+    public static function getModelLabel(): string        { return 'Ürün'; }
+    public static function getPluralModelLabel(): string  { return 'Ürünler'; }
+    public static function getBreadcrumb(): string        { return 'Ürünler'; }
 
     public static function canViewAny(): bool
     {
@@ -24,76 +32,32 @@ class ProductResource extends Resource
         return static::canViewAny();
     }
 
-
     public static function form(Forms\Form $form): Forms\Form
     {
         return $form->schema([
-            Forms\Components\TextInput::make('sku')
-                ->required()
-                ->unique(ignoreRecord: true),
-
-            Forms\Components\TextInput::make('name')
-                ->required(),
-
-            Forms\Components\TextInput::make('price')
-                ->numeric()
-                ->required()
-                ->default(0),
-
-            Forms\Components\TextInput::make('sale_price')
-                ->numeric()
-                ->nullable()
-                ->helperText('Leave empty or 0 for no discount'),
-
-            // If your column is named "stock" in DB, change to ->make('stock')
-            Forms\Components\TextInput::make('stock')
-                ->numeric()
-                ->required()
-                ->default(0),
-
-            // Keep it simple: store an image URL or relative path
-            Forms\Components\TextInput::make('image')
-                ->label('Image URL')
-                ->nullable(),
-        ]);
+            Forms\Components\TextInput::make('sku')->label('SKU')->required()->unique(ignoreRecord: true),
+            Forms\Components\TextInput::make('name')->label('Ad')->required(),
+            Forms\Components\TextInput::make('price')->label('Fiyat (TRY)')->numeric()->required()->default(0),
+            Forms\Components\TextInput::make('sale_price')->label('İndirimli Fiyat (TRY)')->numeric()->nullable()
+                ->helperText('Boş bırakın veya 0 girin (indirim yok).'),
+            Forms\Components\TextInput::make('stock')->label('Stok')->numeric()->required()->default(0),
+            Forms\Components\TextInput::make('image')->label('Görsel URL')->nullable(),
+        ])->columns(2);
     }
 
     public static function table(Tables\Table $table): Tables\Table
     {
         return $table->columns([
             Tables\Columns\TextColumn::make('sku')->label('SKU')->searchable()->sortable(),
-            Tables\Columns\TextColumn::make('name')->label('Name')->searchable()->limit(50),
-
-            Tables\Columns\ImageColumn::make('image')
-                ->label('Image')
-                ->size(50)
-                ->square(),
-
-            Tables\Columns\TextColumn::make('price')
-                ->label('Price')
-                ->money('try', true)
-                ->sortable(),
-
-            Tables\Columns\TextColumn::make('sale_price')
-                ->label('Sale Price')
-                ->money('try', true)
-                ->sortable()
-                ->color('danger'),
-
-            // If your column is named "stock" in DB, change to ->make('stock')
-            Tables\Columns\TextColumn::make('stock')
-                ->label('Stock')
-                ->sortable(),
-
-
+            Tables\Columns\TextColumn::make('name')->label('Ad')->searchable()->limit(60),
+            Tables\Columns\ImageColumn::make('image')->label('Görsel')->size(48)->square(),
+            Tables\Columns\TextColumn::make('price')->label('Fiyat')->money('try', true)->sortable(),
+            Tables\Columns\TextColumn::make('sale_price')->label('İndirimli')->money('try', true)->sortable()->color('danger'),
+            Tables\Columns\TextColumn::make('stock')->label('Stok')->sortable(),
         ])
-        ->filters([])
-        ->actions([
-            Tables\Actions\EditAction::make(),
-        ])
-        ->bulkActions([
-            Tables\Actions\DeleteBulkAction::make(),
-        ]);
+        ->actions([Tables\Actions\EditAction::make()->label('Düzenle')])
+        ->bulkActions([Tables\Actions\DeleteBulkAction::make()->label('Toplu Sil')])
+        ->defaultSort('id', 'desc');
     }
 
     public static function getPages(): array

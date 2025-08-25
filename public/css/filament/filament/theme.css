@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --- Filament v3 helper (enables its CSS variables) --- */
+@layer base {
+  :root {
+    /* tweak radius/brand if you like */
+    --fi-border-radius: 0.75rem;
+  }
+}
+
+/* ---- BRAND ---- */
+.fi-topbar .fi-brand img,
+.fi-sidebar-header .fi-brand img {
+  /* keep logos crisp but aligned */
+  display: block;
+}
+
+/* hide the text brand if any slips through */
+.fi-brand-name { display: none; }
+
+/* ---- SIDEBAR POLISH ---- */
+@layer components {
+  /* Light mode sidebar */
+  [data-theme="light"] .fi-sidebar {
+    background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+    color: #e5e7eb;
+  }
+
+  /* Dark mode sidebar – a bit lighter for contrast */
+  [data-theme="dark"] .fi-sidebar {
+    background: linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
+  }
+
+  /* group titles */
+  .fi-sidebar-group > .fi-section-header {
+    @apply text-gray-300 uppercase tracking-wide text-[11px];
+  }
+
+  /* nav items */
+  .fi-sidebar-item a {
+    @apply rounded-xl text-gray-200;
+  }
+
+  .fi-sidebar-item a:hover {
+    @apply bg-white/5;
+  }
+
+  /* active item */
+  .fi-sidebar-item-active > a {
+    @apply bg-white/10 ring-1 ring-white/10 font-medium;
+  }
+
+  /* icon tone */
+  .fi-sidebar-item svg {
+    @apply opacity-90;
+  }
+
+  /* make the sidebar a tad wider */
+  .fi-sidebar {
+    width: 16.5rem; /* default is 16rem */
+  }
+
+  /* push main content to match width override */
+  .fi-main { grid-template-columns: 16.5rem 1fr; }
+}
+
+/* ---- TOPBAR ---- */
+.fi-topbar {
+  @apply backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-gray-900/60;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+/* table header polish */
+.fi-ta-header { @apply rounded-xl overflow-hidden; }

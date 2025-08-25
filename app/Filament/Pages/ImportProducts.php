@@ -16,24 +16,31 @@ class ImportProducts extends Page
     use InteractsWithForms;
 
     protected static ?string $navigationIcon  = 'heroicon-o-arrow-up-tray';
-    protected static ?string $navigationGroup = 'Catalog';
-    protected static ?string $title = 'Update Stock';
+
+    // 🔽 Menüyü tek grupta toplamak için hepsini "Katalog" yapın
+    protected static ?string $navigationGroup = 'Katalog';
+
+    // 🔽 Türkçe başlıklar
+    protected static ?string $navigationLabel = 'Stok Güncelle';
+    protected static ?string $title           = 'Stok Güncelle';
+    protected static ?string $breadcrumb      = 'Stok Güncelle';
+
     protected static string $view = 'filament.pages.import-products';
 
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->hasAnyRole('admin') ?? false;
+        return auth()->user()?->hasRole('admin') ?? false;
     }
 
     public static function canAccess(): bool
     {
-        // Same check used when visiting the page URL directly
         return static::shouldRegisterNavigation();
     }
-    // Keep form state untyped so Livewire is happy
+
+    // Livewire form state
     public array $data = [
-        'file' => null,
-        'createNew' => true,
+        'file'       => null,
+        'createNew'  => true,
         'updateMeta' => true,
     ];
 
@@ -48,16 +55,15 @@ class ImportProducts extends Page
             ->schema([
                 Forms\Components\FileUpload::make('file')
                     ->label('Excel / CSV')
+                    ->helperText('Dosyalarınızı sürükleyip bırakın ya da Göz atın.')
                     ->acceptedFileTypes([
                         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         'application/vnd.ms-excel',
                         'text/csv',
                     ])
                     ->required()
-                    // keep file in tmp so we get a TemporaryUploadedFile
+                    // tmp’te kalsın ki TemporaryUploadedFile gelsin
                     ->storeFiles(false),
-
-
             ])
             ->statePath('data');
     }
@@ -68,15 +74,14 @@ class ImportProducts extends Page
         $file  = $state['file'] ?? null;
 
         if (! $file) {
-            Notification::make()->title('Please choose a file.')->danger()->send();
+            Notification::make()->title('Lütfen bir dosya seçin.')->danger()->send();
             return;
         }
 
-        // Expect a TemporaryUploadedFile because storeFiles(false) is set
         if (! $file instanceof TemporaryUploadedFile) {
             Notification::make()
-                ->title('Invalid upload state')
-                ->body('Please choose the file again and retry.')
+                ->title('Geçersiz yükleme durumu')
+                ->body('Lütfen dosyayı tekrar seçip yeniden deneyin.')
                 ->danger()
                 ->send();
             return;
@@ -91,18 +96,18 @@ class ImportProducts extends Page
                 $file->getRealPath()
             );
 
-            // clear only the file field
+            // yalnızca dosya alanını temizle
             $state['file'] = null;
             $this->form->fill($state);
 
             Notification::make()
-                ->title('Products imported / updated')
+                ->title('Ürünler içe aktarıldı / güncellendi')
                 ->success()
                 ->send();
 
         } catch (\Throwable $e) {
             Notification::make()
-                ->title('Import failed')
+                ->title('İçe aktarma başarısız')
                 ->body($e->getMessage())
                 ->danger()
                 ->send();

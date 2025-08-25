@@ -4,35 +4,39 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\SellerResource\Pages;
 use App\Models\User;
-use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
-use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;   // <-- import
+use Filament\Tables;
+use Illuminate\Database\Eloquent\Builder;
 
 class SellerResource extends Resource
 {
     protected static ?string $model = User::class;
 
+    // Turkish nav
     protected static ?string $navigationIcon  = 'heroicon-o-user-group';
-    protected static ?string $navigationGroup = 'Sales';
+    protected static ?string $navigationGroup = 'Satışlar';
+    protected static ?string $navigationLabel = 'Satıcılar';
     protected static ?string $slug            = 'sellers';
-    protected static ?string $navigationLabel = 'Sellers';
+
+    public static function getModelLabel(): string        { return 'Satıcı'; }
+    public static function getPluralModelLabel(): string  { return 'Satıcılar'; }
 
     /** Only admins can see/manage sellers */
     public static function canViewAny(): bool
     {
         return auth()->user()?->hasRole('admin') ?? false;
     }
+
     public static function shouldRegisterNavigation(): bool
     {
         return static::canViewAny();
     }
 
-    /** 🔧 Filter to only users with the `seller` role */
+    /** 🔧 Only users with the `seller` role */
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
@@ -42,37 +46,36 @@ class SellerResource extends Resource
     public static function form(Form $form): Form
     {
         return $form->schema([
-            TextInput::make('name')->required()->maxLength(255),
-            TextInput::make('email')->required()->email()->unique(ignoreRecord: true),
-            TextInput::make('phone')->tel()->maxLength(30),
+            TextInput::make('name')->label('Ad Soyad')->required()->maxLength(255),
+            TextInput::make('email')->label('E-posta')->required()->email()->unique(ignoreRecord: true),
+            TextInput::make('phone')->label('Telefon')->tel()->maxLength(30),
             TextInput::make('password')
+                ->label('Şifre')
                 ->password()
                 ->revealable()
-                ->required(fn (string $operation) => $operation === 'create') // ← rename $op → $operation
+                ->required(fn (string $operation) => $operation === 'create')
                 ->dehydrateStateUsing(fn ($state) => filled($state) ? bcrypt($state) : null)
                 ->dehydrated(fn ($state) => filled($state)),
-            Toggle::make('active')->label('Active')->default(true),
+            Toggle::make('active')->label('Aktif')->default(true),
         ])->columns(2);
     }
 
     public static function table(Table $table): Table
     {
         return $table
-            // ❌ remove ->modifyQueryUsing(...) to avoid the $q error
             ->columns([
                 Tables\Columns\TextColumn::make('id')->label('#')->sortable(),
-                Tables\Columns\TextColumn::make('name')->sortable()->searchable(),
-                Tables\Columns\TextColumn::make('email')->searchable(),
-                Tables\Columns\TextColumn::make('phone')->label('Phone'),
-                Tables\Columns\IconColumn::make('active')->boolean(),
-                Tables\Columns\TextColumn::make('created_at')->dateTime()->since()->sortable(),
+                Tables\Columns\TextColumn::make('name')->label('Ad Soyad')->sortable()->searchable(),
+                Tables\Columns\TextColumn::make('email')->label('E-posta')->searchable(),
+                Tables\Columns\TextColumn::make('phone')->label('Telefon'),
+                Tables\Columns\IconColumn::make('active')->label('Aktif')->boolean(),
+                Tables\Columns\TextColumn::make('created_at')->label('Oluşturma')->dateTime()->since()->sortable(),
             ])
+            // ❗ Remove table header create action to avoid duplicates
+            // ->headerActions([ Tables\Actions\CreateAction::make(), ])
             ->actions([
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
-            ])
-            ->headerActions([
-                Tables\Actions\CreateAction::make(),
+                Tables\Actions\EditAction::make()->label('Düzenle'),
+                Tables\Actions\DeleteAction::make()->label('Sil'),
             ])
             ->defaultSort('id', 'desc');
     }

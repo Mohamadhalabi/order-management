@@ -10,14 +10,17 @@ class EditCustomer extends EditRecord
 {
     protected static string $resource = CustomerResource::class;
 
+    protected static ?string $title = 'Müşteri Düzenle';
+    protected static ?string $breadcrumb = 'Düzenle';
+
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        // Only re-hash if password field was filled
         if (array_key_exists('password', $data) && $data['password']) {
             $data['password'] = Hash::make($data['password']);
         } else {
             unset($data['password']);
         }
+
         return $data;
     }
 }

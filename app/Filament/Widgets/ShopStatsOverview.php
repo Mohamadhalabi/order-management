@@ -4,67 +4,53 @@ namespace App\Filament\Widgets;
 
 use App\Models\Order;
 use App\Models\Product;
-use App\Models\User;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
-use Filament\Widgets\StatsOverviewWidget\Card;
+use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Carbon;
 
 class ShopStatsOverview extends BaseWidget
 {
-    protected static ?string $pollingInterval = '60s'; // auto-refresh
+    // ✅ non-static, matches the parent
+    protected ?string $heading = 'Özet';
 
-    public function getColumnSpan(): int|string|array
-    {
-        return 'full';
-    }
+    // you may keep this static (it is static in the parent)
+    protected static ?string $pollingInterval = '60s';
 
+    // optional: make the cards span full width
+    protected int|string|array $columnSpan = 'full';
 
-    protected function getCards(): array
+    protected function getStats(): array
     {
         $user = auth()->user();
+        $orders = Order::query();
 
-        $ordersQuery = Order::query();
-        if ($user?->hasRole('seller') && !$user->hasRole('admin')) {
-            $ordersQuery->where('created_by_id', $user->id);
+        // Sellers see only their own orders
+        if ($user?->hasRole('seller') && ! $user->hasRole('admin')) {
+            $orders->where('created_by_id', $user->id);
         }
 
-        $today = (clone $ordersQuery)->whereDate('created_at', Carbon::today());
-        $month = (clone $ordersQuery)->whereBetween('created_at', [
-            now()->startOfMonth(), now()->endOfMonth()
-        ]);
+        $startOfMonth     = Carbon::now()->startOfMonth();
+        $ordersThisMonth  = (clone $orders)->where('created_at', '>=', $startOfMonth)->count();
+        $revenueThisMonth = (clone $orders)->where('created_at', '>=', $startOfMonth)->sum('total');
+        $uniqueCustomers  = (clone $orders)->distinct('customer_id')->count('customer_id');
+        $productsCount    = Product::query()->count();
 
-        $revenue = (clone $month)->sum('total'); // monthly revenue
-        $ordersCount = (clone $month)->count();
+        return [
+            Stat::make('Bu ay sipariş', number_format($ordersThisMonth))
+                ->description('Toplam sipariş adedi')
+                ->icon('heroicon-o-shopping-bag'),
 
-        $cards = [
-            Card::make('Orders (this month)', number_format($ordersCount))
-                ->description('today: ' . (clone $today)->count())
-                ->descriptionIcon('heroicon-o-shopping-bag')
-                ->color('primary'),
+            Stat::make('Ciro (bu ay)', 'TRY ' . number_format($revenueThisMonth, 2))
+                ->description('Kargo dahil')
+                ->icon('heroicon-o-banknotes'),
 
-            Card::make('Products', number_format(Product::query()->count()))
-                ->description('in catalog')
-                ->descriptionIcon('heroicon-o-cube')
-                ->color('info'),
+            Stat::make('Ürün', number_format($productsCount))
+                ->description('Katalogda')
+                ->icon('heroicon-o-cube'),
 
-            Card::make('Customers', number_format(User::query()
-                ->whereHas('roles', fn ($q) => $q->where('name', '!=', 'seller'))
-                ->count()))
-                ->description('unique customers')
-                ->descriptionIcon('heroicon-o-users')
-                ->color('success'),
+            Stat::make('Müşteri', number_format($uniqueCustomers))
+                ->description('Benzersiz müşteri')
+                ->icon('heroicon-o-user-group'),
         ];
-
-        // Only admins see revenue
-        if ($user?->hasRole('admin')) {
-            array_splice($cards, 1, 0, [
-                Card::make('Revenue (this month)', 'TRY ' . number_format($revenue, 2))
-                    ->description('incl. shipping')
-                    ->descriptionIcon('heroicon-o-banknotes')
-                    ->color('warning'),
-            ]);
-        }
-
-        return $cards;
     }
 }

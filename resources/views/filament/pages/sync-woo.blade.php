@@ -2,19 +2,19 @@
     <div class="flex flex-col gap-4">
         <div class="flex gap-3">
             <x-filament::button wire:click="syncProducts" icon="heroicon-o-cube">
-                Sync Products (queue)
+                Ürünleri Senkronize Et (kuyruk)
             </x-filament::button>
+
             <x-filament::button wire:click="syncUsers" icon="heroicon-o-users">
-                Sync Users (queue)
+                Müşterileri Senkronize Et (kuyruk)
             </x-filament::button>
         </div>
 
-
-        <x-filament::section class="mt-6" heading="Notes">
+        <x-filament::section class="mt-6" heading="Notlar">
             <ul class="list-disc ms-6 text-sm text-gray-600">
-                <li>Stock is <strong>NOT</strong> updated by Woo sync. Use Excel Import for stock.</li>
-                <li>Products matched by <code>SKU</code>, otherwise by <code>wc_id</code>.</li>
-                <li>Customers require an email.</li>
+                <li>Stok <strong>Woo senkronizasyonu ile güncellenmez</strong>. Stok için Excel içe aktarmayı kullanın.</li>
+                <li>Ürünler önce <code>SKU</code> ile, bulunamazsa <code>wc_id</code> ile eşleştirilir.</li>
+                <li>Müşterilerin bir <strong>e-posta</strong> adresi olmalıdır.</li>
             </ul>
         </x-filament::section>
     </div>

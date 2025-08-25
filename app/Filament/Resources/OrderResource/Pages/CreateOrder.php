@@ -3,38 +3,45 @@
 namespace App\Filament\Resources\OrderResource\Pages;
 
 use App\Filament\Resources\OrderResource;
-use App\Models\User;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Filament\Actions;
+use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
-use Filament\Resources\Pages\CreateRecord;
 
 class CreateOrder extends CreateRecord
 {
     protected static string $resource = OrderResource::class;
 
+    // Türkçe başlıklar
+    protected static ?string $title = 'Sipariş Oluştur';
+    protected static ?string $breadcrumb = 'Oluştur';
+
+    /**
+     * Use a generic Action that submits the form.
+     * (Avoid Filament\Actions\CreateAction here to prevent the modal + Form=null error)
+     */
     protected function getFormActions(): array
     {
         return [
-            $this->getCreateFormAction(), // keep "Create"
-            $this->getCancelFormAction(), // keep "Cancel"
-            // $this->getCreateAnotherFormAction(), // removed
+            Actions\Action::make('create')
+                ->label('Oluştur')
+                ->submit('create')     // submit the page form
+                ->color('primary'),
+
+            Actions\Action::make('cancel')
+                ->label('İptal')
+                ->url(static::getResource()::getUrl('index')),
         ];
     }
 
     /**
-     * Before record is created, set creator, recompute totals,
-     * and prefill shipping from customer
+     * Hesaplamalar ve hazır değerler (oluşturma öncesi).
      */
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // IMPORTANT: use RAW state so 'items' is still present on create
-        $state = $this->form->getRawState();             // ← key change
-        if (empty($state)) {
-            // fallback: Filament posts under "data"
-            $state = request()->input('data', []);
-        }
-
+        // RAW state (repeater items dâhil)
+        $state = $this->form->getRawState() ?: request()->input('data', []);
         $items = $state['items'] ?? [];
 
         $subtotal = 0.0;
@@ -47,29 +54,15 @@ class CreateOrder extends CreateRecord
         $shipping = (float)($state['shipping_amount'] ?? $data['shipping_amount'] ?? 0);
         $data['subtotal'] = round($subtotal, 2);
         $data['total']    = round($subtotal + $shipping, 2);
+        $data['created_by_id'] = Auth::id();
 
-        $data['created_by_id'] = \Auth::id();
-
-        // … your existing customer prefill (unchanged) …
-        if (!empty($data['customer_id'])) {
-            if ($c = \App\Models\User::find($data['customer_id'])) {
-                $data['shipping_name']          = $data['shipping_name']          ?? ($c->name ?? null);
-                $data['shipping_phone']         = $data['shipping_phone']         ?? ($c->phone ?? null);
-                $data['shipping_address_line1'] = $data['shipping_address_line1'] ?? ($c->address_line1 ?? null);
-                $data['shipping_address_line2'] = $data['shipping_address_line2'] ?? ($c->address_line2 ?? null);
-                $data['shipping_city']          = $data['shipping_city']          ?? ($c->city ?? null);
-                $data['shipping_state']         = $data['shipping_state']         ?? ($c->state ?? null);
-                $data['shipping_postcode']      = $data['shipping_postcode']      ?? ($c->postcode ?? null);
-                $data['shipping_country']       = $data['shipping_country']       ?? ($c->country ?? null);
-            }
-        }
-
+        // (İstersen müşteri adresinden doldurma burada da yapılabilir)
         return $data;
     }
 
-
-
-    /** After the record exists, render and store a PDF */
+    /**
+     * Kayıt oluşunca PDF üret ve kaydet.
+     */
     protected function afterCreate(): void
     {
         $order = $this->record->fresh(['items.product', 'customer']);
@@ -81,9 +74,9 @@ class CreateOrder extends CreateRecord
 
         $order->update(['pdf_path' => $path]);
     }
+
     protected function getRedirectUrl(): string
     {
-        // Go back to the Orders index after a successful create
         return $this->getResource()::getUrl('index');
     }
 }

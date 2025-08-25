@@ -9,9 +9,11 @@ class ListProducts extends ListRecords
 {
     protected static string $resource = ProductResource::class;
 
+    protected static ?string $title = 'Ürünler';
+    protected static ?string $breadcrumb = 'Liste';
+
     protected function getHeaderActions(): array
     {
-        // No Create button for sellers
-        return [];
+        return []; // "Yeni Ürün" butonu yok
     }
 }

@@ -11,6 +11,11 @@ use Illuminate\Support\Facades\Hash;
 
 class WooSyncService
 {
+    protected static ?string $navigationLabel = 'Woo Senkronizasyonu';
+    protected static ?string $title           = 'Woo Senkronizasyonu';
+    protected static ?string $breadcrumb      = 'Senkronizasyon';
+    protected static ?string $navigationGroup = 'Katalog';
+
     public function __construct(private WooClient $client) {}
 
     /** Sync products: DOES NOT TOUCH stock */
