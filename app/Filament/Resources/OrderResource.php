@@ -18,7 +18,6 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\View as ViewComponent;
 use Filament\Forms\Components\Grid;
-use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
@@ -31,12 +30,10 @@ class OrderResource extends Resource
     protected static ?string $model = Order::class;
     protected static ?string $navigationIcon = 'heroicon-o-receipt-refund';
 
-    // keep ONLY these once — no duplicates elsewhere in the class
     protected static ?string $navigationGroup   = 'Satışlar';
     protected static ?string $navigationLabel   = 'Siparişler';
     protected static ?string $pluralModelLabel  = 'Siparişler';
     protected static ?string $modelLabel        = 'Sipariş';
-
 
     public static function canViewAny(): bool
     {
@@ -56,35 +53,34 @@ class OrderResource extends Resource
                     ->schema([
                         Section::make('Sipariş')
                             ->schema([
-                            Select::make('customer_id')
-                                ->label('Müşteri')
-                                ->required()
-                                ->searchable()
-                                ->getSearchResultsUsing(function (string $search) {
-                                    $like = "%{$search}%";
+                                Select::make('customer_id')
+                                    ->label('Müşteri')
+                                    ->required()
+                                    ->searchable()
+                                    ->getSearchResultsUsing(function (string $search) {
+                                        $like = "%{$search}%";
 
-                                    return \App\Models\User::query()
-                                        // EITHER exclude sellers:
-                                        ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'seller'))
-                                        // OR, if you have a dedicated "customer" role, use this instead:
-                                        // ->whereHas('roles', fn ($r) => $r->where('name', 'customer'))
-                                        ->where(function ($q) use ($like) {
-                                            $q->where('name', 'like', $like)
-                                            ->orWhere('email', 'like', $like)
-                                            ->orWhere('phone', 'like', $like);
-                                        })
-                                        ->limit(50)
-                                        ->pluck('name', 'id');
-                                })
-                                ->getOptionLabelUsing(function ($value) {
-                                    return \App\Models\User::query()
-                                        ->whereKey($value)
-                                        ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'seller')) // keep consistent
-                                        ->value('name');
-                                })
-                                ->native(false)
-                                ->reactive()
-                                ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get)),
+                                        return User::query()
+                                            ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'seller'))
+                                            ->where(function ($q) use ($like) {
+                                                $q->where('name', 'like', $like)
+                                                  ->orWhere('email', 'like', $like)
+                                                  ->orWhere('phone', 'like', $like);
+                                            })
+                                            ->limit(50)
+                                            ->pluck('name', 'id');
+                                    })
+                                    ->getOptionLabelUsing(function ($value) {
+                                        return User::query()
+                                            ->whereKey($value)
+                                            ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'seller'))
+                                            ->value('name');
+                                    })
+                                    ->native(false)
+                                    ->reactive()
+                                    // fill on change and when form loads
+                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get))
+                                    ->afterStateHydrated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get)),
 
                                 Select::make('status')
                                     ->label('Durum')
@@ -139,7 +135,8 @@ class OrderResource extends Resource
                                                 ->getSearchResultsUsing(function (string $search) {
                                                     $like = "%{$search}%";
                                                     return Product::query()
-                                                        ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))
+                                                        ->where(fn ($q) => $q->where('sku', 'like', $like)
+                                                            ->orWhere('name', 'like', $like))
                                                         ->limit(50)
                                                         ->get()
                                                         ->mapWithKeys(fn ($p) => [$p->id => "{$p->sku} | {$p->name}"])
@@ -153,7 +150,7 @@ class OrderResource extends Resource
                                                 ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                                     if (!$state) return;
 
-                                                    // Aynı ürün engeli (unchanged)
+                                                    // Aynı ürünü iki kez ekleme
                                                     $items = $get('../../items') ?: [];
                                                     $instances = 0;
                                                     foreach ($items as $row) {
@@ -161,18 +158,17 @@ class OrderResource extends Resource
                                                     }
                                                     if ($instances > 1) {
                                                         $set('product_id', null);
-                                                        \Filament\Notifications\Notification::make()
+                                                        Notification::make()
                                                             ->title('Bu ürün zaten siparişe eklendi.')
                                                             ->danger()
                                                             ->send();
                                                         return;
                                                     }
 
-                                                    // ----> FIX: doğru alanlardan doldur
                                                     $p = Product::find($state);
                                                     if (!$p) return;
 
-                                                    $unit = (float) ($p->sale_price ?? $p->price ?? 0);
+                                                    $unit  = (float) ($p->sale_price ?? $p->price ?? 0);
                                                     $stock = (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
                                                     $img   = $p->image ?: null;
 
@@ -211,7 +207,7 @@ class OrderResource extends Resource
                                                 ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                 ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
 
-                                            // Gizli önbellek alanları
+                                            // Gizli cache alanları
                                             TextInput::make('product_name')->hidden()->dehydrated(),
                                             TextInput::make('sku')->hidden()->dehydrated(),
                                             TextInput::make('stock_snapshot')
@@ -225,7 +221,7 @@ class OrderResource extends Resource
                                                         }
                                                     }
                                                 }),
-                                                TextInput::make('image_url')
+                                            TextInput::make('image_url')
                                                 ->hidden()
                                                 ->dehydrated()
                                                 ->afterStateHydrated(function ($state, Set $set, Get $get) {
@@ -273,10 +269,10 @@ class OrderResource extends Resource
                         Section::make('Fatura Adresi')
                             ->schema([
                                 Grid::make(12)->schema([
+                                    // Use customer name, keep hidden but saved
                                     TextInput::make('billing_name')
-                                        ->label('Ad Soyad')
-                                        ->required()
-                                        ->columnSpan(6),
+                                        ->hidden()
+                                        ->dehydrated(),
 
                                     TextInput::make('billing_phone')
                                         ->label('Telefon')
@@ -300,7 +296,7 @@ class OrderResource extends Resource
                                         ->preload()
                                         ->native(false)
                                         ->columnSpan(12)
-                                        ->afterStateHydrated(function ($state, \Filament\Forms\Set $set) {
+                                        ->afterStateHydrated(function ($state, Set $set) {
                                             if (blank($state)) return;
                                             if (! str_starts_with((string) $state, 'TR')) {
                                                 $nameToCode = [];
@@ -316,7 +312,6 @@ class OrderResource extends Resource
                                         ->label('Posta Kodu')
                                         ->columnSpan(12),
 
-                                    // Ülke her zaman TR (gizli)
                                     TextInput::make('billing_country')
                                         ->default('TR')
                                         ->dehydrated()
@@ -331,26 +326,36 @@ class OrderResource extends Resource
 
     protected static function fillBillingFromCustomer(Set $set, Get $get): void
     {
-        if (! $get('use_customer_address')) {
-            return;
-        }
+        $customerId = $get('customer_id');
+        if (! $customerId) return;
 
-        $u = $get('customer_id') ? User::find($get('customer_id')) : null;
+        $u = User::find($customerId);
         if (! $u) return;
 
-        $set('billing_name',          $u->name ?? null);
-        $set('billing_phone',         $u->phone ?? null);
-        $set('billing_address_line1', $u->billing_address_line1 ?? null);
-        $set('billing_address_line2', $u->billing_address_line2 ?? null);
-        $set('billing_city',          $u->billing_city ?? null);
-        $set('billing_state',         $u->billing_state ?? null);
-        $set('billing_postcode',      $u->billing_postcode ?? null);
-        $set('billing_country',       $u->billing_country ?? 'TR');
-    }
+        // Always use customer's name
+        $set('billing_name', $u->name ?? null);
 
-    protected static function fillShippingFromCustomer(Set $set, Get $get): void
-    {
-        // İleride shipping_* alanlarını eklersen buraya benzer eşleme yapılır.
+        // Fill others only if blank (preserve manual edits)
+        $fillIfBlank = function (string $key, $value) use ($set, $get) {
+            if (blank($get($key))) $set($key, $value);
+        };
+
+        $fillIfBlank('billing_phone',         $u->phone ?? null);
+        $fillIfBlank('billing_address_line1', $u->billing_address_line1 ?? null);
+        $fillIfBlank('billing_address_line2', $u->billing_address_line2 ?? null);
+        $fillIfBlank('billing_city',          $u->billing_city ?? null);
+
+        $state = $u->billing_state ?? null;
+        if ($state && ! str_starts_with((string) $state, 'TR')) {
+            $map = [];
+            foreach (self::turkishProvinces() as $code => $name) {
+                $map[mb_strtolower($name)] = $code;
+            }
+            $state = $map[mb_strtolower($state)] ?? $state;
+        }
+        $fillIfBlank('billing_state',    $state);
+        $fillIfBlank('billing_postcode', $u->billing_postcode ?? null);
+        $fillIfBlank('billing_country',  $u->billing_country ?? 'TR');
     }
 
     protected static function recalcTotals(Set $set, Get $get): void
@@ -392,17 +397,15 @@ class OrderResource extends Resource
                     ->placeholder('-')
                     ->toggleable(),
             ])
-                ->actions([
-                    Tables\Actions\EditAction::make()->label('Düzenle'),
-
-                    Tables\Actions\Action::make('pdf')
-                        ->label('PDF')
-                        ->icon('heroicon-o-document-text')
-                        ->button()
-                        ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
-                        ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
-                ])
-
+            ->actions([
+                Tables\Actions\EditAction::make()->label('Düzenle'),
+                Tables\Actions\Action::make('pdf')
+                    ->label('PDF')
+                    ->icon('heroicon-o-document-text')
+                    ->button()
+                    ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
+                    ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
+            ])
             ->defaultSort('id', 'desc');
     }
 
@@ -418,7 +421,7 @@ class OrderResource extends Resource
     protected static function setRoot(Set $set, string $key, mixed $value): void
     {
         $set($key, $value);
-        foreach (["../..", "../../.."] as $prefix) {
+        foreach (['../..', '../../..'] as $prefix) {
             try {
                 $set("{$prefix}/{$key}", $value);
             } catch (\Throwable $e) {}
