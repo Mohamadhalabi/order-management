@@ -1,0 +1,29 @@
+/* --- Active sidebar item = brand blue ----------------------------------- */
+:root { --brand:#2D83B0; }
+
+/* Highlight the active link, text & icon */
+.fi-sidebar a[aria-current="page"],
+.fi-sidebar .fi-sidebar-item.fi-active > a,
+.fi-sidebar .fi-sidebar-item[data-active="true"] > a {
+  color: var(--brand) !important;
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.fi-sidebar a[aria-current="page"] .fi-icon,
+.fi-sidebar .fi-sidebar-item.fi-active > a .fi-icon {
+  color: var(--brand) !important;
+}
+
+/* Left indicator bar (when present) */
+.fi-sidebar .fi-sidebar-item-indicator,
+.fi-sidebar .fi-sidebar-item::before {
+  background-color: var(--brand) !important;
+}
+
+/* Primary buttons = brand blue + WHITE text (used below for PDF) */
+.fi-btn.fi-color-primary{
+  background-color: var(--brand) !important;
+  border-color: var(--brand) !important;
+  color:#fff !important;
+}
+.fi-btn.fi-color-primary:hover{ filter:brightness(0.95); }

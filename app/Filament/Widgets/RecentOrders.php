@@ -53,16 +53,17 @@ class RecentOrders extends BaseWidget
             ])
             ->actions([
                 Tables\Actions\Action::make('pdf')
+                    ->label('PDF')
                     ->icon('heroicon-o-document-text')
-                    ->iconButton()
-                    ->tooltip('PDF Aç')
-                    ->visible(fn (Order $r) => filled($r->pdf_path))
-                    ->url(fn (Order $r) => $r->pdf_url, shouldOpenInNewTab: true),
+                    ->button() // renders a full button (not the tiny chip)
+                    ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
+                    ->url(fn (Order $r) => route('orders.pdf', $r), shouldOpenInNewTab: true),
 
                 Tables\Actions\Action::make('edit')
                     ->icon('heroicon-o-pencil-square')
                     ->iconButton()
                     ->tooltip('Düzenle')
+                    ->visible(fn () => auth()->user()?->hasRole('admin')) // (optional) hide from sellers
                     ->url(fn (Order $r) => route('filament.admin.resources.orders.edit', ['record' => $r])),
             ]);
     }

@@ -78,7 +78,7 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'tr'),
+    'locale' => 'tr',
 
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'tr'),
 

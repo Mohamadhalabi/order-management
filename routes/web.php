@@ -2,10 +2,20 @@
 
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\OrderPdfController;
 
 Route::get('/', function () {
-    return view('welcome');
-});
+    // If already logged in, send them to the right panel
+    if (auth()->check()) {
+        return redirect()->to(
+            auth()->user()->hasRole('seller')
+                ? url('/seller')
+                : url('/admin')
+        );
+    }
+
+    return view('choose-login');
+})->name('landing');
 
 // Dashboard (only admin role can see this)
 Route::get('/dashboard', function () {
@@ -55,6 +65,11 @@ Route::get('/_logout', function () {
     request()->session()->regenerateToken();
     return 'logged out';
 });
+
+
+Route::middleware(['web', 'auth'])  // anyone logged-in (admin or seller)
+    ->get('/orders/{order}/pdf', [OrderPdfController::class, 'show'])
+    ->name('orders.pdf');
 
 
 require __DIR__.'/auth.php';

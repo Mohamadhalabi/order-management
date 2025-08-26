@@ -139,8 +139,7 @@ class OrderResource extends Resource
                                                 ->getSearchResultsUsing(function (string $search) {
                                                     $like = "%{$search}%";
                                                     return Product::query()
-                                                        ->where(fn ($q) => $q->where('sku', 'like', $like)
-                                                            ->orWhere('name', 'like', $like))
+                                                        ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))
                                                         ->limit(50)
                                                         ->get()
                                                         ->mapWithKeys(fn ($p) => [$p->id => "{$p->sku} | {$p->name}"])
@@ -154,7 +153,7 @@ class OrderResource extends Resource
                                                 ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                                     if (!$state) return;
 
-                                                    // Aynı ürün eklenmesini engelle
+                                                    // Aynı ürün engeli (unchanged)
                                                     $items = $get('../../items') ?: [];
                                                     $instances = 0;
                                                     foreach ($items as $row) {
@@ -162,22 +161,26 @@ class OrderResource extends Resource
                                                     }
                                                     if ($instances > 1) {
                                                         $set('product_id', null);
-                                                        Notification::make()
+                                                        \Filament\Notifications\Notification::make()
                                                             ->title('Bu ürün zaten siparişe eklendi.')
                                                             ->danger()
                                                             ->send();
                                                         return;
                                                     }
 
-                                                    // Bağımlı alanları doldur
+                                                    // ----> FIX: doğru alanlardan doldur
                                                     $p = Product::find($state);
                                                     if (!$p) return;
 
-                                                    $set('unit_price', (float) ($p->sale_price ?? $p->price ?? 0));
-                                                    $set('stock_snapshot', (int) ($p->stock_quantity ?? 0));
+                                                    $unit = (float) ($p->sale_price ?? $p->price ?? 0);
+                                                    $stock = (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
+                                                    $img   = $p->image ?: null;
+
+                                                    $set('unit_price', $unit);
+                                                    $set('stock_snapshot', $stock);
                                                     $set('product_name', $p->name);
                                                     $set('sku', $p->sku);
-                                                    $set('image_url', $p->image ?: null);
+                                                    $set('image_url', $img);
 
                                                     self::recalcTotals($set, $get);
                                                 }),
@@ -211,8 +214,18 @@ class OrderResource extends Resource
                                             // Gizli önbellek alanları
                                             TextInput::make('product_name')->hidden()->dehydrated(),
                                             TextInput::make('sku')->hidden()->dehydrated(),
-                                            TextInput::make('stock_snapshot')->hidden()->dehydrated(),
-                                            TextInput::make('image_url')
+                                            TextInput::make('stock_snapshot')
+                                                ->hidden()
+                                                ->dehydrated()
+                                                ->afterStateHydrated(function ($state, Set $set, Get $get) {
+                                                    if (!$state && ($pid = $get('product_id'))) {
+                                                        $p = Product::find($pid);
+                                                        if ($p) {
+                                                            $set('stock_snapshot', (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0));
+                                                        }
+                                                    }
+                                                }),
+                                                TextInput::make('image_url')
                                                 ->hidden()
                                                 ->dehydrated()
                                                 ->afterStateHydrated(function ($state, Set $set, Get $get) {
@@ -379,18 +392,17 @@ class OrderResource extends Resource
                     ->placeholder('-')
                     ->toggleable(),
             ])
-            ->actions([
-                Tables\Actions\EditAction::make()->label('Düzenle'),
-                Tables\Actions\Action::make('pdf')
-                    ->label('PDF')
-                    ->icon('heroicon-o-document-arrow-down')
-                    ->button()
-                    ->outlined()
-                    ->color('primary')
-                    ->size('sm')
-                    ->url(fn (Order $r) => $r->pdf_url, true)
-                    ->visible(fn (Order $r) => filled($r->pdf_path)),
-            ])
+                ->actions([
+                    Tables\Actions\EditAction::make()->label('Düzenle'),
+
+                    Tables\Actions\Action::make('pdf')
+                        ->label('PDF')
+                        ->icon('heroicon-o-document-text')
+                        ->button()
+                        ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
+                        ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
+                ])
+
             ->defaultSort('id', 'desc');
     }
 

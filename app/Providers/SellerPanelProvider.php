@@ -5,6 +5,8 @@ namespace App\Providers;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Http\Middleware\Authenticate as FilamentAuthenticate;
+use Filament\Support\Assets\Css;
+use Filament\Support\Colors\Color;
 
 class SellerPanelProvider extends PanelProvider
 {
@@ -16,19 +18,26 @@ class SellerPanelProvider extends PanelProvider
             ->login()
             ->authGuard('web')
 
-            // 👇 Share the same app resources/pages/widgets used by the admin panel
-            ->discoverResources(
-                in: app_path('Filament/Resources'),
-                for: 'App\\Filament\\Resources',
-            )
-            ->discoverPages(
-                in: app_path('Filament/Pages'),
-                for: 'App\\Filament\\Pages',
-            )
-            ->discoverWidgets(
-                in: app_path('Filament/Widgets'),
-                for: 'App\\Filament\\Widgets',
-            )
+            // Branding
+            ->brandLogo(asset('images/Logo-Normal.webp'))
+            ->brandLogoHeight('2.5rem')
+            ->brandName('')
+
+            // Theme assets (no Vite)
+            ->assets([
+                Css::make('brand', asset('filament/brand.css')),
+            ])
+
+            // Use your brand color everywhere (also override "warning" to kill orange)
+            ->colors([
+                'primary' => Color::hex('#2D83B0'),
+                'warning' => Color::hex('#2D83B0'),
+                'gray'    => Color::Gray,
+            ])
+
+            ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
+            ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
+            ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
 
             ->middleware([
                 \Illuminate\Cookie\Middleware\EncryptCookies::class,
@@ -40,7 +49,7 @@ class SellerPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 FilamentAuthenticate::class,
-                'role:seller', // only users with the "seller" role can access this panel
+                'role:seller',
             ]);
     }
 }
