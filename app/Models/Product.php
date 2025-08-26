@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class Product extends Model
 {
     protected $fillable = [
-        'sku', 'wc_id', 'name', 'price', 'sale_price', 'image',
+        'sku', 'wc_id', 'name', 'price', 'sale_price', 'image','stock'
         // 'stock' is intentionally omitted to prevent mass-assignment via sync
         // add other fields you allow
     ];
