@@ -5,27 +5,15 @@
     /** Money formatter: 1 234,56 */
     $fmt = fn($v) => number_format((float) $v, 2, ',', '.');
 
-    /**
-     * Build a Dompdf-friendly path/URL for images.
-     * - accepts data:, http(s):// as-is
-     * - for local files, ensures absolute path under public/
-     * - normalizes "storage/..." vs "public/storage/..."
-     */
+    /** Build a Dompdf-friendly path/URL for images */
     $toPath = function (?string $path) {
         if (!$path) return null;
-
-        if (Str::startsWith($path, ['data:', 'http://', 'https://'])) {
-            return $path;
-        }
-
-        $relative = Str::startsWith($path, 'storage/')
-            ? $path
-            : ('storage/' . ltrim($path, '/'));
-
+        if (Str::startsWith($path, ['data:', 'http://', 'https://'])) return $path;
+        $relative = Str::startsWith($path, 'storage/') ? $path : ('storage/' . ltrim($path, '/'));
         return public_path($relative);
     };
 
-    // Backwards-compat: if template previously used $toUrl(...), point it here.
+    // Back-compat
     $toUrl = $toPath;
 
     $brand = '#2D83B0';
@@ -35,6 +23,29 @@
     $customer  = $customer  ?? ($order->customer ?? null);
     $creator   = $creator   ?? ($order->creator  ?? null);
     $createdAt = optional($order->created_at)->timezone(config('app.timezone', 'UTC'));
+
+    // ---- Totals (KDV dahil) ----
+    $calcSubtotal = function() use ($items) {
+        return (float) $items->sum(function($r){
+            $q = (float) ($r->qty ?? 1);
+            $p = (float) ($r->unit_price ?? 0);
+            return $q * $p;
+        });
+    };
+
+    $subtotal    = isset($order->subtotal) ? (float)$order->subtotal : $calcSubtotal();
+    $shipping    = (float)($order->shipping_amount ?? 0);
+    $kdvPercent  = (float)($order->kdv_percent ?? 0);
+    $kdvAmount   = isset($order->kdv_amount) ? (float)$order->kdv_amount : round($subtotal * $kdvPercent / 100, 2);
+    $grandTotal  = (float)($order->total ?? ($subtotal + $shipping + $kdvAmount));
+
+    // number formatting for percent (no currency symbol)
+    $fmtPct = function ($v) {
+        // trim trailing zeros like 18,00 -> 18
+        $s = number_format((float)$v, 2, ',', '.');
+        $s = rtrim(rtrim($s, '0'), ',');
+        return $s;
+    };
 @endphp
 
 <!doctype html>
@@ -43,7 +54,6 @@
     <meta charset="utf-8">
     <title>Sipariş #{{ $order->id }}</title>
     <style>
-        /* Use DejaVu Sans for Turkish glyphs (bundled with Dompdf) */
         @page { margin: 24mm 18mm 22mm 18mm; }
         body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #111; }
         h1,h2,h3,h4 { margin: 0; }
@@ -52,24 +62,16 @@
         .small { font-size: 10px; }
         .xs { font-size: 9px; }
 
-        /* Header */
-        .header {
-            display: table; width: 100%; margin-bottom: 14px;
-        }
+        .header { display: table; width: 100%; margin-bottom: 14px; }
         .header .left { display: table-cell; vertical-align: top; width: 60%; }
         .header .right { display: table-cell; vertical-align: top; text-align: right; width: 40%; }
         .logo { height: 36px; margin-bottom: 6px; }
 
         .rule { height: 2px; background: {{ $brand }}; opacity: .15; margin: 8px 0 14px; }
 
-        /* Panels */
         .panel { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
-        .badge {
-            display: inline-block; padding: 2px 8px; border-radius: 999px;
-            background: #eef2ff; color: #374151; border: 1px solid #e5e7eb; font-size: 10px;
-        }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #374151; border: 1px solid #e5e7eb; font-size: 10px; }
 
-        /* Table */
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 8px 10px; border: 1px solid #e5e7eb; vertical-align: middle; }
         th { background: #f8fafc; font-weight: 700; text-align: left; }
@@ -78,16 +80,12 @@
         .qty { text-align: center; width: 48px; }
         .thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; display: block; }
 
-        /* Totals box */
-        .totals { width: 280px; margin-left: auto; }
+        .totals { width: 320px; margin-left: auto; }
         .totals td { border-left: none; border-right: none; }
         .totals tr:first-child td { border-top: 1px solid #e5e7eb; }
         .totals tr:last-child td { border-bottom: 1px solid #e5e7eb; }
         .totals .label { color: #374151; }
         .totals .grand { font-weight: 700; }
-
-        /* Footer */
-        .footer { margin-top: 12mm; color: #6b7280; font-size: 10px; text-align: center; }
     </style>
 </head>
 <body>
@@ -188,24 +186,31 @@
         </tbody>
     </table>
 
-    {{-- TOTALS --}}
+    {{-- TOTALS (KDV dahil) --}}
     <table class="totals" style="margin-top:10px;">
         <tr>
             <td class="label">Ara Toplam</td>
-            <td class="right">₺ {{ $fmt($order->subtotal ?? $items->sum(fn($r)=>(float)($r->qty??1)*(float)($r->unit_price??0))) }}</td>
+            <td class="right">₺ {{ $fmt($subtotal) }}</td>
         </tr>
         <tr>
             <td class="label">Kargo</td>
-            <td class="right">₺ {{ $fmt($order->shipping_amount ?? 0) }}</td>
+            <td class="right">₺ {{ $fmt($shipping) }}</td>
+        </tr>
+        <tr>
+            <td class="label">KDV %</td>
+            <td class="right">{{ $fmtPct($kdvPercent) }} %</td>
+        </tr>
+        <tr>
+            <td class="label">KDV (TRY)</td>
+            <td class="right">₺ {{ $fmt($kdvAmount) }}</td>
         </tr>
         <tr>
             <td class="label grand">Toplam</td>
-            <td class="right grand">₺ {{ $fmt($order->total ?? 0) }}</td>
+            <td class="right grand">₺ {{ $fmt($grandTotal) }}</td>
         </tr>
     </table>
 
-    {{-- FOOTER --}}
-    <div class="footer">
+    <div class="footer" style="margin-top:12mm; color:#6b7280; font-size:10px; text-align:center;">
         Herhangi bir sorunuz için bizimle iletişime geçin: <strong>Satis@aanahtar.com.tr</strong> · (+90) 552 436 80 30
     </div>
 

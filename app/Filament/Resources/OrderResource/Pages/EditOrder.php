@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Storage;
 class EditOrder extends EditRecord
 {
     protected static string $resource = OrderResource::class;
+
     protected static ?string $title = 'Sipariş Düzenle';
     protected static ?string $breadcrumb = 'Düzenle';
 
@@ -34,26 +35,19 @@ class EditOrder extends EditRecord
         ];
     }
 
-    /** Re-calc totals before save */
+    /** Kayıttan önce toplamları (KDV dahil) yeniden hesapla */
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        $state = $this->form->getRawState() ?: request()->input('data', []);
-        $items = $state['items'] ?? [];
+        $state   = $this->form->getRawState() ?: request()->input('data', []);
+        $payload = array_merge($data, $state);
 
-        $subtotal = 0.0;
-        foreach ($items as $row) {
-            $q = (float)($row['qty'] ?? 0);
-            $p = (float)($row['unit_price'] ?? 0);
-            $subtotal += $q * $p;
-        }
-        $shipping = (float)($state['shipping_amount'] ?? $data['shipping_amount'] ?? 0);
-        $data['subtotal'] = round($subtotal, 2);
-        $data['total']    = round($subtotal + $shipping, 2);
+        // Toplamları tek yerden hesapla (subtotal, kdv_amount, total)
+        $payload = OrderResource::recomputeTotalsFromArray($payload);
 
-        return $data;
+        return $payload;
     }
 
-    /** Regenerate PDF every time the order is saved */
+    /** Her kayıttan sonra PDF'i güncelle */
     protected function afterSave(): void
     {
         $order = $this->record->fresh(['items.product', 'customer']);
@@ -63,7 +57,7 @@ class EditOrder extends EditRecord
         $path = $order->pdf_path ?: "orders/{$order->id}.pdf";
         Storage::disk('public')->put($path, $pdf->output());
 
-        // avoid touching timestamps/observers unnecessarily
+        // timestamps’i gereksiz yere değiştirmeyelim
         $order->updateQuietly(['pdf_path' => $path]);
     }
 }

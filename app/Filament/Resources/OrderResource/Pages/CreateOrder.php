@@ -19,14 +19,13 @@ class CreateOrder extends CreateRecord
 
     /**
      * Use a generic Action that submits the form.
-     * (Avoid Filament\Actions\CreateAction here to prevent the modal + Form=null error)
      */
     protected function getFormActions(): array
     {
         return [
             Actions\Action::make('create')
                 ->label('Oluştur')
-                ->submit('create')     // submit the page form
+                ->submit('create')
                 ->color('primary'),
 
             Actions\Action::make('cancel')
@@ -36,28 +35,21 @@ class CreateOrder extends CreateRecord
     }
 
     /**
-     * Hesaplamalar ve hazır değerler (oluşturma öncesi).
+     * Kayıttan önce (ara toplam, kdv ve toplam) değerlerini garantiye al.
      */
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // RAW state (repeater items dâhil)
-        $state = $this->form->getRawState() ?: request()->input('data', []);
-        $items = $state['items'] ?? [];
+        // Formun ham state'ini al (repeater dahil) ve data ile birleştir
+        $state   = $this->form->getRawState() ?: request()->input('data', []);
+        $payload = array_merge($data, $state);
 
-        $subtotal = 0.0;
-        foreach ($items as $row) {
-            $q = (float)($row['qty'] ?? 0);
-            $p = (float)($row['unit_price'] ?? 0);
-            $subtotal += $q * $p;
-        }
+        // Toplamları tek noktadan hesapla (KDV dahil)
+        $payload = OrderResource::recomputeTotalsFromArray($payload);
 
-        $shipping = (float)($state['shipping_amount'] ?? $data['shipping_amount'] ?? 0);
-        $data['subtotal'] = round($subtotal, 2);
-        $data['total']    = round($subtotal + $shipping, 2);
-        $data['created_by_id'] = Auth::id();
+        // Oluşturan kullanıcı
+        $payload['created_by_id'] = Auth::id();
 
-        // (İstersen müşteri adresinden doldurma burada da yapılabilir)
-        return $data;
+        return $payload;
     }
 
     /**

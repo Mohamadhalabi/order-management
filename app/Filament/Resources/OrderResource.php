@@ -78,7 +78,6 @@ class OrderResource extends Resource
                                     })
                                     ->native(false)
                                     ->reactive()
-                                    // fill on change and when form loads
                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get))
                                     ->afterStateHydrated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get)),
 
@@ -114,7 +113,6 @@ class OrderResource extends Resource
                                             'default' => 1,
                                             'sm' => 12, 'md' => 12, 'lg' => 12, 'xl' => 12,
                                         ])->schema([
-                                            // GÖRSEL
                                             ViewComponent::make('filament.components.product-thumb')
                                                 ->viewData(function (Get $get) {
                                                     $url = $get('image_url');
@@ -125,7 +123,6 @@ class OrderResource extends Resource
                                                 })
                                                 ->columnSpan(['default' => 12, 'sm' => 2, 'md' => 2, 'lg' => 2, 'xl' => 2]),
 
-                                            // ÜRÜN
                                             Select::make('product_id')
                                                 ->label('Ürün')
                                                 ->required()
@@ -150,7 +147,6 @@ class OrderResource extends Resource
                                                 ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                                     if (!$state) return;
 
-                                                    // Aynı ürünü iki kez ekleme
                                                     $items = $get('../../items') ?: [];
                                                     $instances = 0;
                                                     foreach ($items as $row) {
@@ -181,7 +177,6 @@ class OrderResource extends Resource
                                                     self::recalcTotals($set, $get);
                                                 }),
 
-                                            // ADET
                                             TextInput::make('qty')
                                                 ->label('Adet')
                                                 ->numeric()
@@ -198,7 +193,6 @@ class OrderResource extends Resource
                                                 })
                                                 ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
 
-                                            // BİRİM FİYAT
                                             TextInput::make('unit_price')
                                                 ->label('Birim Fiyat')
                                                 ->numeric()
@@ -207,7 +201,6 @@ class OrderResource extends Resource
                                                 ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                 ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
 
-                                            // Gizli cache alanları
                                             TextInput::make('product_name')->hidden()->dehydrated(),
                                             TextInput::make('sku')->hidden()->dehydrated(),
                                             TextInput::make('stock_snapshot')
@@ -249,6 +242,7 @@ class OrderResource extends Resource
                                     ->readOnly()
                                     ->default(0)
                                     ->dehydrated(true),
+
                                 TextInput::make('shipping_amount')
                                     ->label('Kargo (TRY)')
                                     ->numeric()
@@ -256,6 +250,23 @@ class OrderResource extends Resource
                                     ->reactive()
                                     ->dehydrated(true)
                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
+
+                                TextInput::make('kdv_percent')
+                                    ->label('KDV %')
+                                    ->numeric()
+                                    ->default(0)
+                                    ->suffix('%')
+                                    ->reactive()
+                                    ->dehydrated(true)
+                                    ->afterStateHydrated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get))
+                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
+
+                                TextInput::make('kdv_amount')
+                                    ->label('KDV (TRY)')
+                                    ->numeric()
+                                    ->readOnly()
+                                    ->dehydrated(true),
+
                                 TextInput::make('total')
                                     ->label('Toplam (TRY)')
                                     ->numeric()
@@ -263,16 +274,12 @@ class OrderResource extends Resource
                                     ->default(0)
                                     ->dehydrated(true),
                             ])
-                            ->columns(1),
+                            ->columns(2),
 
-                        // ===== Fatura Adresi =====
                         Section::make('Fatura Adresi')
                             ->schema([
                                 Grid::make(12)->schema([
-                                    // Use customer name, keep hidden but saved
-                                    TextInput::make('billing_name')
-                                        ->hidden()
-                                        ->dehydrated(),
+                                    TextInput::make('billing_name')->hidden()->dehydrated(),
 
                                     TextInput::make('billing_phone')
                                         ->label('Telefon')
@@ -292,9 +299,7 @@ class OrderResource extends Resource
                                     Select::make('billing_state')
                                         ->label('İl (Eyalet)')
                                         ->options(self::turkishProvinces())
-                                        ->searchable()
-                                        ->preload()
-                                        ->native(false)
+                                        ->searchable()->preload()->native(false)
                                         ->columnSpan(12)
                                         ->afterStateHydrated(function ($state, Set $set) {
                                             if (blank($state)) return;
@@ -303,19 +308,13 @@ class OrderResource extends Resource
                                                 foreach (self::turkishProvinces() as $code => $name) {
                                                     $nameToCode[mb_strtolower($name)] = $code;
                                                 }
-                                                $code = $nameToCode[mb_strtolower($state)] ?? null;
-                                                if ($code) $set('billing_state', $code);
+                                                $code = $nameToCode[mb_strtolower($state)] ?? $state;
+                                                $set('billing_state', $code);
                                             }
                                         }),
 
-                                    TextInput::make('billing_postcode')
-                                        ->label('Posta Kodu')
-                                        ->columnSpan(12),
-
-                                    TextInput::make('billing_country')
-                                        ->default('TR')
-                                        ->dehydrated()
-                                        ->hidden(),
+                                    TextInput::make('billing_postcode')->label('Posta Kodu')->columnSpan(12),
+                                    TextInput::make('billing_country')->default('TR')->dehydrated()->hidden(),
                                 ]),
                             ]),
                     ])
@@ -332,10 +331,8 @@ class OrderResource extends Resource
         $u = User::find($customerId);
         if (! $u) return;
 
-        // Always use customer's name
         $set('billing_name', $u->name ?? null);
 
-        // Fill others only if blank (preserve manual edits)
         $fillIfBlank = function (string $key, $value) use ($set, $get) {
             if (blank($get($key))) $set($key, $value);
         };
@@ -358,18 +355,46 @@ class OrderResource extends Resource
         $fillIfBlank('billing_country',  $u->billing_country ?? 'TR');
     }
 
+    /** Live form recalculation */
     protected static function recalcTotals(Set $set, Get $get): void
     {
         $items = $get('../../items') ?? $get('items') ?? [];
-        $sub = 0;
+        $sub = 0.0;
         foreach ($items as $row) {
             $qty   = (float)($row['qty'] ?? 0);
             $price = (float)($row['unit_price'] ?? 0);
             $sub  += $qty * $price;
         }
         $ship = (float)($get('../../shipping_amount') ?? $get('shipping_amount') ?? 0);
-        self::setRoot($set, 'subtotal', round($sub, 2));
-        self::setRoot($set, 'total',    round($sub + $ship, 2));
+        $kdvP = (float)($get('../../kdv_percent') ?? $get('kdv_percent') ?? 0);
+
+        // KDV only on goods (sub), as in your screenshot
+        $kdvAmount = round($sub * $kdvP / 100, 2);
+
+        self::setRoot($set, 'subtotal',   round($sub, 2));
+        self::setRoot($set, 'kdv_amount', $kdvAmount);
+        self::setRoot($set, 'total',      round($sub + $ship + $kdvAmount, 2));
+    }
+
+    /** Used by Create/Edit pages to enforce totals on save */
+    public static function recomputeTotalsFromArray(array $data): array
+    {
+        $sub = 0.0;
+        foreach (($data['items'] ?? []) as $row) {
+            $qty   = (float)($row['qty'] ?? 0);
+            $price = (float)($row['unit_price'] ?? 0);
+            $sub  += $qty * $price;
+        }
+        $ship = (float)($data['shipping_amount'] ?? 0);
+        $kdvP = (float)($data['kdv_percent'] ?? 0);
+
+        $kdvAmount = round($sub * $kdvP / 100, 2);
+
+        $data['subtotal']   = round($sub, 2);
+        $data['kdv_amount'] = $kdvAmount;
+        $data['total']      = round($sub + $ship + $kdvAmount, 2);
+
+        return $data;
     }
 
     public static function table(Table $table): Table
@@ -379,8 +404,7 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('id')->label('#')->sortable(),
                 Tables\Columns\TextColumn::make('customer.name')->label('Müşteri')->searchable(),
                 Tables\Columns\TextColumn::make('status')
-                    ->label('Durum')
-                    ->badge()
+                    ->label('Durum')->badge()
                     ->colors([
                         'warning' => 'pending',
                         'success' => 'paid',
@@ -389,20 +413,16 @@ class OrderResource extends Resource
                         'gray'    => 'draft',
                     ]),
                 Tables\Columns\TextColumn::make('subtotal')->label('Ara Toplam')->money('try', true)->sortable(),
+                Tables\Columns\TextColumn::make('kdv_amount')->label('KDV')->money('try', true)->sortable(),
                 Tables\Columns\TextColumn::make('shipping_amount')->label('Kargo')->money('try', true)->sortable(),
                 Tables\Columns\TextColumn::make('total')->label('Toplam')->money('try', true)->sortable(),
                 Tables\Columns\TextColumn::make('created_at')->label('Oluşturma')->dateTime()->since()->sortable(),
-                Tables\Columns\TextColumn::make('creator.name')
-                    ->label('Oluşturan')
-                    ->placeholder('-')
-                    ->toggleable(),
+                Tables\Columns\TextColumn::make('creator.name')->label('Oluşturan')->placeholder('-')->toggleable(),
             ])
             ->actions([
                 Tables\Actions\EditAction::make()->label('Düzenle'),
                 Tables\Actions\Action::make('pdf')
-                    ->label('PDF')
-                    ->icon('heroicon-o-document-text')
-                    ->button()
+                    ->label('PDF')->icon('heroicon-o-document-text')->button()
                     ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
                     ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
             ])
@@ -422,13 +442,11 @@ class OrderResource extends Resource
     {
         $set($key, $value);
         foreach (['../..', '../../..'] as $prefix) {
-            try {
-                $set("{$prefix}/{$key}", $value);
-            } catch (\Throwable $e) {}
+            try { $set("{$prefix}/{$key}", $value); } catch (\Throwable $e) {}
         }
     }
 
-    /** @return array<string,string> kod => ad */
+    /** @return array<string,string> */
     protected static function turkishProvinces(): array
     {
         return [
