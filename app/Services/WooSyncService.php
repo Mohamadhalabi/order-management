@@ -23,47 +23,61 @@ class WooSyncService
     {
         $count = 0;
 
-        \DB::transaction(function () use (&$count) {
+        // 1. Fetch exchange rate from your custom API
+        $tryRate = 1; // fallback
+        try {
+            $response = @file_get_contents('https://www.aanahtar.com.tr/wp-json/custom/v1/exchange-rates');
+            if ($response !== false) {
+                $rates = json_decode($response, true);
+                if (!empty($rates['TRY']['rate'])) {
+                    $tryRate = (float) $rates['TRY']['rate'];
+                }
+            }
+        } catch (\Exception $e) {
+            \Log::error('WooSync exchange rate fetch failed: ' . $e->getMessage());
+        }
+
+        \DB::transaction(function () use (&$count, $tryRate) {
             foreach ($this->client->pagedGet('/products') as $p) {
                 $wcId = (int) ($p['id'] ?? 0);
                 $rawSku = trim((string) ($p['sku'] ?? ''));
-                $sku    = $rawSku !== '' ? $rawSku : "WC-{$wcId}"; // ✅ fallback
+                $sku    = $rawSku !== '' ? $rawSku : "WC-{$wcId}";
 
-                // 1) Prefer to load by wc_id if we’ve seen it before
+                // Load product by wc_id OR SKU
                 $product = \App\Models\Product::where('wc_id', $wcId)->first();
-
-                // 2) Otherwise try by (fallback) sku
-                if (! $product) {
+                if (!$product) {
                     $product = \App\Models\Product::firstOrNew(['sku' => $sku]);
                 }
 
-                // Ensure we have a non-empty SKU stored
                 if (empty($product->sku)) {
                     $product->sku = $sku;
                 }
 
-                // Keep Excel as the source of truth for stock (do NOT touch stock here)
                 $product->wc_id = $wcId;
                 $product->name  = (string) ($p['name'] ?? $product->name ?? '');
 
-                // Prices
-                $product->price = (float) ($p['price'] ?? $product->price ?? 0);
-                $reg  = (float) ($p['regular_price'] ?? 0);
-                $sale = (float) ($p['sale_price'] ?? 0);
+                // Prices from WooCommerce (USD) → Convert to TRY
+                $regUSD  = (float) ($p['regular_price'] ?? 0);
+                $saleUSD = (float) ($p['sale_price'] ?? 0);
+                $priceUSD = (float) ($p['price'] ?? $regUSD);
 
+                $reg  = $regUSD * $tryRate;
+                $sale = $saleUSD * $tryRate;
+                $price = $priceUSD * $tryRate;
+
+                // Apply pricing logic
                 if ($sale > 0) {
                     $product->sale_price = $sale;
-                    if ($product->price <= 0 && $reg > 0) {
-                        $product->price = $reg;
-                    }
+                    $product->price = $price > 0 ? $price : $reg;
                 } else {
-                    // keep existing sale_price (or null)
                     if ($product->price <= 0 && $reg > 0) {
                         $product->price = $reg;
+                    } else {
+                        $product->price = $price;
                     }
                 }
 
-                // Image: first image URL if present
+                // Product image
                 $images = $p['images'] ?? [];
                 if (!empty($images) && !empty($images[0]['src'])) {
                     $product->image = $images[0]['src'];
@@ -78,6 +92,7 @@ class WooSyncService
 
         return $count;
     }
+
 
 
     /** Sync customers into users table */
