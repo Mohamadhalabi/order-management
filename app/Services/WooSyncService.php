@@ -41,7 +41,9 @@ class WooSyncService
             foreach ($this->client->pagedGet('/products') as $p) {
                 $wcId = (int) ($p['id'] ?? 0);
                 $rawSku = trim((string) ($p['sku'] ?? ''));
-                $sku    = $rawSku !== '' ? $rawSku : "WC-{$wcId}";
+                $sku = $rawSku !== '' 
+                    ? str_replace('-', '', $rawSku) 
+                    : "WC-{$wcId}";
 
                 // Load product by wc_id OR SKU
                 $product = \App\Models\Product::where('wc_id', $wcId)->first();
