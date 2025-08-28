@@ -89,7 +89,11 @@ class OrderResource extends Resource
                                             ->required()
                                             ->email()
                                             ->rules(['email', 'max:191', \Illuminate\Validation\Rule::unique('users', 'email')]),
-                                        Forms\Components\TextInput::make('phone')->label('Telefon'),
+                                            Forms\Components\TextInput::make('phone')
+                                                ->label('Telefon')
+                                                ->required()
+                                                ->tel()
+                                                ->rules(['required', 'string', 'max:20']),
 
                                         Forms\Components\Fieldset::make('Fatura Adresi')
                                             ->schema([
@@ -140,7 +144,7 @@ class OrderResource extends Resource
                                     ->label('Durum')
                                     ->options([
                                         'draft'     => 'Taslak',
-                                        'pending'   => 'Beklemede',
+                                        'approved'   => 'Onaylandı',
                                         'paid'      => 'Ödendi',
                                         'shipped'   => 'Kargolandı',
                                         'cancelled' => 'İptal',
@@ -344,11 +348,13 @@ class OrderResource extends Resource
                                 Grid::make(12)->schema([
                                     // use customer name (hidden but saved)
                                     TextInput::make('billing_name')->hidden()->dehydrated(),
-
                                     TextInput::make('billing_phone')
                                         ->label('Telefon')
                                         ->tel()
+                                        ->required()
+                                        ->rules(['required', 'string', 'max:20'])
                                         ->columnSpan(6),
+
 
                                     Textarea::make('billing_address_line1')
                                         ->label('Adres Satırı')
