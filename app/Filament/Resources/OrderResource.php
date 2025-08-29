@@ -381,9 +381,9 @@ class OrderResource extends Resource
                             ->schema([
                                 \Filament\Forms\Components\Grid::make(12)->schema([
                                     \Filament\Forms\Components\TextInput::make('billing_name')->hidden()->dehydrated(),
-                                    \Filament\Forms\Components\TextInput::make('billing_phone')->label('Telefon')->tel()->required()
-                                        ->rules(['required', 'string', 'max:20'])->columnSpan(6),
-                                    \Filament\Forms\Components\Textarea::make('billing_address_line1')->label('Adres Satırı')->rows(2)->required()->columnSpan(12),
+                                    \Filament\Forms\Components\TextInput::make('billing_phone')->label('Telefon')->tel()
+                                        ->rules(['string', 'max:20'])->columnSpan(6),
+                                    \Filament\Forms\Components\Textarea::make('billing_address_line1')->label('Adres Satırı')->rows(2)->columnSpan(12),
                                     \Filament\Forms\Components\TextInput::make('billing_city')->label('Şehir / İlçe')->columnSpan(12),
                                     \Filament\Forms\Components\Select::make('billing_state')->label('İl (Eyalet)')
                                         ->options(self::turkishProvinces())->searchable()->preload()->native(false)->columnSpan(12)
