@@ -10,16 +10,18 @@ class ListOrders extends ListRecords
 {
     protected static string $resource = OrderResource::class;
 
-    protected static ?string $title = 'Siparişler';     // Page title
-    protected static ?string $breadcrumb = 'Liste';     // Breadcrumb
+    protected static ?string $title = 'Siparişler';
+    protected static ?string $breadcrumb = 'Liste';
 
     protected function getHeaderActions(): array
     {
         return [
             Actions\CreateAction::make()
-                ->label('Yeni Sipariş')   // <-- Custom button text
-                ->icon('heroicon-o-plus') // <-- Optional: add plus icon
-                ->color('primary'),       // <-- Optional: make button styled primary
+                ->label('Yeni Sipariş')
+                ->icon('heroicon-o-plus')
+                ->color('primary'),
         ];
     }
+
+    // ❌ DO NOT add getTableFilters()
 }

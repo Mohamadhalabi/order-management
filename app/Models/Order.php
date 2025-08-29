@@ -9,7 +9,6 @@ class Order extends Model
 {
     use HasFactory;
 
-    // If you prefer, you can use $guarded = []; instead of $fillable.
     protected $fillable = [
         'customer_id',
         'status',
@@ -17,8 +16,10 @@ class Order extends Model
 
         'subtotal',
         'shipping_amount',
-        'kdv_percent',   // <-- add
-        'kdv_amount',    // <-- add
+        'kdv_percent',
+        'kdv_amount',
+        'discount_percent',
+        'discount_amount',
         'total',
 
         'billing_name',
@@ -35,17 +36,27 @@ class Order extends Model
     ];
 
     protected $casts = [
-        'subtotal'        => 'decimal:2',
-        'shipping_amount' => 'decimal:2',
-        'kdv_percent'     => 'decimal:2',
-        'kdv_amount'      => 'decimal:2',
-        'total'           => 'decimal:2',
-        'created_at'      => 'datetime',
-        'updated_at'      => 'datetime',
+        'subtotal'         => 'decimal:2',
+        'shipping_amount'  => 'decimal:2',
+        'kdv_percent'      => 'decimal:2',
+        'kdv_amount'       => 'decimal:2',
+        'discount_amount'   => 'decimal:2',
+        'discount_percent' => 'decimal:2',
+        'total'            => 'decimal:2',
+        'created_at'       => 'datetime',
+        'updated_at'       => 'datetime',
     ];
 
     /* ----------------- Relationships ----------------- */
-
+    protected static function booted(): void
+    {
+        static::creating(function (Order $order) {
+            if (blank($order->created_by_id)) {
+                $order->created_by_id = auth()->id();
+            }
+        });
+    }
+    
     public function customer()
     {
         return $this->belongsTo(User::class, 'customer_id');
@@ -67,7 +78,6 @@ class Order extends Model
     {
         if (! $this->pdf_path) return null;
 
-        // assumes public disk or default storage symlink
         return \Storage::url($this->pdf_path);
     }
 }
