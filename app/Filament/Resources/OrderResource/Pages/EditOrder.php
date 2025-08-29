@@ -3,84 +3,96 @@
 namespace App\Filament\Resources\OrderResource\Pages;
 
 use App\Filament\Resources\OrderResource;
-use Barryvdh\DomPDF\Facade\Pdf;
-use Filament\Actions;
+use App\Models\Product;
 use Filament\Resources\Pages\EditRecord;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 class EditOrder extends EditRecord
 {
     protected static string $resource = OrderResource::class;
 
-    protected static ?string $title = 'Sipariş Düzenle';
-    protected static ?string $breadcrumb = 'Düzenle';
+    /**
+     * Snapshot of the order's product totals when the page loaded.
+     * Format: [product_id => qty_total]
+     */
+    public array $originalTotals = [];
 
-    /** ✅ Block access if status is tamamlandi */
     public function mount($record): void
     {
         parent::mount($record);
 
-        if ($this->record->status === 'tamamlandi') {
-            abort(403, 'Bu sipariş tamamlandı ve düzenlenemez.');
+        // Build the "before" snapshot from DB
+        $this->originalTotals = $this->totalsFrom($this->record->items()->get());
+    }
+
+    /**
+     * Create a [product_id => qty_total] map from a collection of items.
+     */
+    protected function totalsFrom($items): array
+    {
+        $out = [];
+        foreach ($items as $row) {
+            $pid = (int) ($row->product_id ?? 0);
+            $qty = (float) ($row->qty ?? 0);
+            if ($pid <= 0 || $qty == 0) {
+                continue;
+            }
+            $out[$pid] = ($out[$pid] ?? 0) + $qty;
         }
+        return $out;
     }
 
-    /** Header actions */
-    protected function getHeaderActions(): array
-    {
-        return [
-            Actions\DeleteAction::make(),
-        ];
-    }
-
-    /** Footer form actions */
-    protected function getFormActions(): array
-    {
-        return [
-            Actions\Action::make('save')
-                ->label('Kaydet')
-                ->submit('save')
-                ->color('primary'),
-            Actions\Action::make('cancel')
-                ->label('İptal')
-                ->url(static::getResource()::getUrl('index')),
-        ];
-    }
-
-    protected function mutateFormDataBeforeSave(array $data): array
-    {
-        $state   = $this->form->getRawState() ?: request()->input('data', []);
-        $payload = array_merge($data, $state);
-
-        // 🚫 Block save when no items
-        $items = $payload['items'] ?? [];
-        if (empty($items)) {
-            \Filament\Notifications\Notification::make()
-                ->title('Siparişe en az 1 ürün eklemelisiniz.')
-                ->danger()
-                ->send();
-
-            // show inline error under the repeater
-            $this->addError('data.items', 'Siparişe en az 1 ürün eklemelisiniz.');
-
-            // stop saving gracefully (no 500)
-            $this->halt();
-        }
-
-        return \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($payload);
-    }
-
-
-
+    /**
+     * After Filament persists the repeater changes, adjust product stock
+     * by the *difference* between new and original totals.
+     */
     protected function afterSave(): void
     {
-        $order = $this->record->fresh(['items.product', 'customer']);
+        // Recompute "after" snapshot from DB
+        $currentTotals = $this->totalsFrom($this->record->items()->get());
 
-        $pdf = Pdf::loadView('pdf.order', ['order' => $order]);
+        // Compute per-product deltas
+        $productIds = array_unique(array_merge(
+            array_keys($this->originalTotals),
+            array_keys($currentTotals),
+        ));
 
-        $path = $order->pdf_path ?: "orders/{$order->id}.pdf";
-        Storage::disk('public')->put($path, $pdf->output());
+        DB::transaction(function () use ($productIds, $currentTotals) {
+            foreach ($productIds as $pid) {
+                if (!$pid) continue;
 
-        $order->updateQuietly(['pdf_path' => $path]);
+                $before = (float) ($this->originalTotals[$pid] ?? 0);
+                $after  = (float) ($currentTotals[$pid]   ?? 0);
+                $delta  = $after - $before;   // +ve => take from stock, -ve => return to stock
+
+                if ($delta == 0.0) {
+                    continue; // nothing changed for this product
+                }
+
+                $product = Product::lockForUpdate()->find($pid);
+                if (!$product) {
+                    continue;
+                }
+
+                // Find the stock column your model actually uses.
+                $stockColumn = collect(['stock', 'stock_quantity', 'quantity'])
+                    ->first(fn ($c) => !is_null($product->getAttribute($c))) ?? 'stock';
+
+                $currentStock = (float) $product->getAttribute($stockColumn);
+
+                if ($delta > 0) {
+                    // Ordered more than before => decrease stock
+                    $product->setAttribute($stockColumn, max(0, $currentStock - $delta));
+                } else {
+                    // Ordered less than before => increase stock
+                    $product->setAttribute($stockColumn, $currentStock + abs($delta));
+                }
+
+                $product->save();
+            }
+        });
+
+        // Reset snapshot so subsequent saves with no changes do nothing
+        $this->originalTotals = $this->totalsFrom($this->record->items()->get());
     }
 }

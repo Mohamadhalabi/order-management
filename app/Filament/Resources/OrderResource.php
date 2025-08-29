@@ -54,18 +54,20 @@ class OrderResource extends Resource
     {
         return $form
             ->schema([
-                Group::make()
+                // LEFT SIDE
+                \Filament\Forms\Components\Group::make()
                     ->schema([
-                        Section::make('Sipariş')
+                        \Filament\Forms\Components\Section::make('Sipariş')
                             ->schema([
-                                Select::make('customer_id')
+                                \Filament\Forms\Components\Select::make('customer_id')
                                     ->label('Müşteri')
                                     ->required()
                                     ->searchable()
+                                    ->native(false)
                                     ->getSearchResultsUsing(function (string $search) {
                                         $like = "%{$search}%";
 
-                                        return User::query()
+                                        return \App\Models\User::query()
                                             ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'seller'))
                                             ->where(fn ($q) => $q
                                                 ->where('name', 'like', $like)
@@ -76,33 +78,32 @@ class OrderResource extends Resource
                                             ->pluck('name', 'id');
                                     })
                                     ->getOptionLabelUsing(function ($value) {
-                                        return User::query()
+                                        return \App\Models\User::query()
                                             ->whereKey($value)
                                             ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'seller'))
                                             ->value('name');
                                     })
-                                    ->native(false)
                                     ->reactive()
                                     ->createOptionForm([
-                                        Forms\Components\TextInput::make('name')->label('Ad Soyad')->required(),
-                                        Forms\Components\TextInput::make('email')->label('E-posta')->email()
+                                        \Filament\Forms\Components\TextInput::make('name')->label('Ad Soyad')->required(),
+                                        \Filament\Forms\Components\TextInput::make('email')->label('E-posta')->email()
                                             ->rules(['nullable', 'email', 'max:191', \Illuminate\Validation\Rule::unique('users', 'email')]),
-                                        Forms\Components\TextInput::make('phone')->label('Telefon')->tel()
+                                        \Filament\Forms\Components\TextInput::make('phone')->label('Telefon')->tel()
                                             ->rules(['nullable', 'string', 'max:20']),
-                                        Forms\Components\Fieldset::make('Fatura Adresi')->schema([
-                                            Forms\Components\TextInput::make('billing_address_line1')->label('Adres Satırı'),
-                                            Forms\Components\TextInput::make('billing_city')->label('Şehir / İlçe'),
-                                            Forms\Components\Select::make('billing_state')
+                                        \Filament\Forms\Components\Fieldset::make('Fatura Adresi')->schema([
+                                            \Filament\Forms\Components\TextInput::make('billing_address_line1')->label('Adres Satırı'),
+                                            \Filament\Forms\Components\TextInput::make('billing_city')->label('Şehir / İlçe'),
+                                            \Filament\Forms\Components\Select::make('billing_state')
                                                 ->label('İl (Eyalet)')
                                                 ->options(self::turkishProvinces())
                                                 ->searchable()->preload()->native(false),
-                                            Forms\Components\TextInput::make('billing_postcode')->label('Posta Kodu'),
-                                            Forms\Components\TextInput::make('billing_country')->label('Ülke')->default('TR'),
+                                            \Filament\Forms\Components\TextInput::make('billing_postcode')->label('Posta Kodu'),
+                                            \Filament\Forms\Components\TextInput::make('billing_country')->label('Ülke')->default('TR'),
                                         ])->columns(2),
                                     ])
-                                    ->createOptionAction(fn (Action $action) => $action->label('Yeni Müşteri Ekle'))
+                                    ->createOptionAction(fn (\Filament\Forms\Components\Actions\Action $action) => $action->label('Yeni Müşteri Ekle'))
                                     ->createOptionUsing(function (array $data) {
-                                        $u = new User();
+                                        $u = new \App\Models\User();
                                         $u->name  = $data['name'] ?? (explode('@', $data['email'])[0] ?? 'Müşteri');
                                         $u->email = $data['email'] ?? null;
                                         $u->phone = $data['phone'] ?? null;
@@ -113,7 +114,7 @@ class OrderResource extends Resource
                                         $u->billing_postcode      = $data['billing_postcode'] ?? null;
                                         $u->billing_country       = $data['billing_country'] ?? 'TR';
 
-                                        $u->password = \Hash::make(Str::random(40));
+                                        $u->password = \Hash::make(\Illuminate\Support\Str::random(40));
                                         $u->save();
 
                                         if (\Spatie\Permission\Models\Role::where('name', 'customer')->exists()) {
@@ -122,30 +123,30 @@ class OrderResource extends Resource
 
                                         return $u->getKey();
                                     })
-                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get))
-                                    ->afterStateHydrated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get)),
+                                    ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::fillBillingFromCustomer($set, $get))
+                                    ->afterStateHydrated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::fillBillingFromCustomer($set, $get)),
 
-                                Select::make('status')
+                                \Filament\Forms\Components\Select::make('status')
                                     ->label('Durum')
                                     ->options([
                                         'taslak'     => 'Taslak',
                                         'onaylandi'  => 'Onaylandı',
                                         'odendi'     => 'Ödendi',
                                         'kargolandi' => 'Kargolandı',
-                                        'tamamlandi'  => 'Tamamlandı',
+                                        'tamamlandi' => 'Tamamlandı',
                                         'iptal'      => 'İptal',
                                     ])
                                     ->default('taslak')
                                     ->required()
                                     ->native(false),
 
-                                Textarea::make('notes')->label('Notlar')->rows(2),
+                                \Filament\Forms\Components\Textarea::make('notes')->label('Notlar')->rows(2),
                             ])
                             ->columns(2),
 
-                        Section::make('Kalemler')
+                        \Filament\Forms\Components\Section::make('Kalemler')
                             ->schema([
-                                Repeater::make('items')
+                                \Filament\Forms\Components\Repeater::make('items')
                                     ->relationship()
                                     ->live()
                                     ->minItems(1)
@@ -154,43 +155,48 @@ class OrderResource extends Resource
                                     ->collapsible(false)
                                     ->reorderable(false)
                                     ->schema([
-                                        Grid::make(['default' => 1, 'sm' => 12, 'md' => 12, 'lg' => 12, 'xl' => 12])
-                                            ->extraAttributes(function (Get $get) {
-                                                $pid   = $get('product_id');
-                                                $stock = (int) ($get('stock_snapshot') ?? 0);
-                                                return ($pid && $stock <= 0)
+                                        \Filament\Forms\Components\Grid::make(['default' => 1, 'sm' => 12, 'md' => 12, 'lg' => 12, 'xl' => 12])
+                                            ->extraAttributes(function (\Filament\Forms\Get $get) {
+                                                $pid = $get('product_id');
+                                                if (! $pid) return [];
+
+                                                $p = \App\Models\Product::find($pid);
+                                                $live = (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
+
+                                                return $live <= 0
                                                     ? ['style' => 'border:1px solid #dc2626;border-radius:8px;padding:8px;']
                                                     : [];
                                             })
                                             ->schema([
-                                                ViewComponent::make('filament.components.product-thumb')
-                                                    ->viewData(function (Get $get) {
+                                                \Filament\Forms\Components\View::make('filament.components.product-thumb')
+                                                    ->viewData(function (\Filament\Forms\Get $get) {
                                                         $url = $get('image_url');
                                                         if ($url && ! str_starts_with($url, 'http')) {
-                                                            $url = Storage::url($url);
+                                                            $url = \Illuminate\Support\Facades\Storage::url($url);
                                                         }
                                                         return ['url' => $url, 'size' => 72];
                                                     })
                                                     ->columnSpan(['default' => 12, 'sm' => 2, 'md' => 2, 'lg' => 2, 'xl' => 2]),
 
-                                                Select::make('product_id')
+                                                \Filament\Forms\Components\Select::make('product_id')
                                                     ->label('Ürün')
                                                     ->required()
                                                     ->searchable()
                                                     ->native(false)
                                                     ->columnSpan(['default' => 12, 'sm' => 10, 'md' => 10, 'lg' => 10, 'xl' => 10])
-                                                    ->helperText(function (Get $get) {
-                                                        $pid   = $get('product_id');
-                                                        $stock = (int) ($get('stock_snapshot') ?? 0);
-                                                        if (!$pid) return null;
-                                                        if ($stock <= 0) {
-                                                            return new HtmlString('<span style="color:#dc2626;font-weight:600;">Bu ürün stokta yok</span>');
+                                                    ->helperText(function (\Filament\Forms\Get $get) {
+                                                        $pid = $get('product_id');
+                                                        if (! $pid) return null;
+                                                        $p = \App\Models\Product::find($pid);
+                                                        $live = (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
+                                                        if ($live <= 0) {
+                                                            return new \Illuminate\Support\HtmlString('<span style="color:#dc2626;font-weight:600;">Bu ürün stokta yok</span>');
                                                         }
                                                         return null;
                                                     })
                                                     ->getSearchResultsUsing(function (string $search) {
                                                         $like = "%{$search}%";
-                                                        return Product::query()
+                                                        return \App\Models\Product::query()
                                                             ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))
                                                             ->limit(50)
                                                             ->get()
@@ -198,34 +204,33 @@ class OrderResource extends Resource
                                                             ->toArray();
                                                     })
                                                     ->getOptionLabelUsing(function ($value) {
-                                                        $p = Product::find($value);
+                                                        $p = \App\Models\Product::find($value);
                                                         return $p ? "{$p->sku} | {$p->name}" : null;
                                                     })
                                                     ->reactive()
-                                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                                        if (!$state) return;
+                                                    ->afterStateUpdated(function ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) {
+                                                        if (! $state) return;
 
-                                                        // ✅ Allow duplicates, but warn if this product already exists in other rows
+                                                        // warn on duplicate (allowed)
                                                         $items = $get('../../items') ?: [];
-                                                        $instances = 0;
+                                                        $count = 0;
                                                         foreach ($items as $row) {
-                                                            if (($row['product_id'] ?? null) == $state) $instances++;
+                                                            if (($row['product_id'] ?? null) == $state) $count++;
                                                         }
-                                                        if ($instances > 1) {
+                                                        if ($count > 1) {
                                                             \Filament\Notifications\Notification::make()
-                                                                ->title('Bu ürün zaten siparişte mevcut. Yine de eklendi.')
-                                                                ->body('Aynı üründen birden fazla kalem eklediniz. İsterseniz adet alanını kullanarak tek satırda toplayabilirsiniz.')
+                                                                ->title('Bu ürün zaten siparişte mevcut.')
+                                                                ->body('Aynı ürünü birden fazla kez ekliyorsunuz. Devam etmek istediğinize emin misiniz?')
                                                                 ->warning()
-                                                                ->persistent()   // stays until closed
+                                                                ->persistent()
                                                                 ->send();
                                                         }
 
-                                                        // continue filling the row normally
-                                                        $p = Product::find($state);
-                                                        if (!$p) return;
+                                                        $p = \App\Models\Product::find($state);
+                                                        if (! $p) return;
 
                                                         $unit  = (float) ($p->sale_price ?? $p->price ?? 0);
-                                                        $stock = (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
+                                                        $stock = (int)   ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
                                                         $img   = $p->image ?: null;
 
                                                         $set('unit_price', $unit);
@@ -237,165 +242,164 @@ class OrderResource extends Resource
                                                         if ($stock <= 0) {
                                                             \Filament\Notifications\Notification::make()
                                                                 ->title('Bu ürün stokta yok')
-                                                                ->danger()
-                                                                ->send();
+                                                                ->danger()->send();
                                                         }
 
                                                         self::recalcTotals($set, $get);
                                                     }),
-                                                TextInput::make('qty')
+
+                                                \Filament\Forms\Components\TextInput::make('qty')
                                                     ->label('Adet')
                                                     ->numeric()
                                                     ->required()
-                                                    ->default(1)
                                                     ->minValue(1)
-                                                    ->dehydrated(true)
-                                                    // turn blanks into 1, and enforce integer >= 1
-                                                    ->dehydrateStateUsing(fn ($state) => ($state === null || $state === '') ? 1 : max(1, (int) $state))
+                                                    ->default(1)
                                                     ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
-                                                    ->helperText(function (Get $get) {
-                                                        if (!$get('product_id')) return null;
-                                                        $stock = (int) $get('stock_snapshot');
-                                                        $style = $stock > 0 ? 'color:#16a34a; font-weight:600;' : 'color:#dc2626; font-weight:600;';
-                                                        return new \Illuminate\Support\HtmlString("<span style=\"{$style}\">Stok: {$stock}</span>");
+                                                    ->helperText(function (\Filament\Forms\Get $get) {
+                                                        $pid = $get('product_id');
+                                                        if (! $pid) return null;
+
+                                                        $p = \App\Models\Product::find($pid);
+                                                        $live = (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
+                                                        $style = $live > 0 ? 'color:#16a34a;font-weight:600;' : 'color:#dc2626;font-weight:600;';
+                                                        return new \Illuminate\Support\HtmlString("<span style=\"{$style}\">Stok: {$live}</span>");
                                                     })
-                                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
-                                                    
-                                                TextInput::make('unit_price')
+                                                    ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
+
+                                                \Filament\Forms\Components\TextInput::make('unit_price')
                                                     ->label('Birim Fiyat')
                                                     ->numeric()
+                                                    ->required()
+                                                    ->minValue(0)
                                                     ->default(0)
-                                                    ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                     ->reactive()
-                                                    ->dehydrated(true)
-                                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get))
-                                                    ->dehydrateStateUsing(fn ($state) => $state === null || $state === '' ? 0 : (float)$state),
+                                                    ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
+                                                    ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
 
+                                                \Filament\Forms\Components\TextInput::make('product_name')->hidden()->dehydrated(),
+                                                \Filament\Forms\Components\TextInput::make('sku')->hidden()->dehydrated(),
 
-                                                TextInput::make('product_name')->hidden()->dehydrated(),
-                                                TextInput::make('sku')->hidden()->dehydrated(),
-                                                TextInput::make('stock_snapshot')->hidden()->dehydrated()
-                                                    ->afterStateHydrated(function ($state, Set $set, Get $get) {
-                                                        if (!$state && ($pid = $get('product_id'))) {
-                                                            $p = Product::find($pid);
+                                                // keep a snapshot but refresh it when page loads
+                                                \Filament\Forms\Components\TextInput::make('stock_snapshot')->hidden()->dehydrated()
+                                                    ->afterStateHydrated(function ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) {
+                                                        if ($pid = $get('product_id')) {
+                                                            $p = \App\Models\Product::find($pid);
                                                             if ($p) $set('stock_snapshot', (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0));
                                                         }
                                                     }),
-                                                TextInput::make('image_url')->hidden()->dehydrated()
-                                                    ->afterStateHydrated(function ($state, Set $set, Get $get) {
+
+                                                \Filament\Forms\Components\TextInput::make('image_url')->hidden()->dehydrated()
+                                                    ->afterStateHydrated(function ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) {
                                                         if (!$state && ($pid = $get('product_id'))) {
-                                                            if ($img = Product::find($pid)?->image) $set('image_url', $img);
+                                                            if ($img = \App\Models\Product::find($pid)?->image) $set('image_url', $img);
                                                         }
                                                     }),
                                             ]),
                                     ])
                                     ->createItemButtonLabel('Kalem ekle')
-                                    ->afterStateUpdated(fn (Set $set, Get $get) => self::recalcTotals($set, $get)),
+                                    ->afterStateUpdated(fn (\Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
                             ]),
                     ])
                     ->columnSpan(2),
 
-                Group::make()
+                // RIGHT SIDE
+                \Filament\Forms\Components\Group::make()
                     ->schema([
-                    Section::make('Toplamlar')
-                        ->schema([
-                            TextInput::make('subtotal')
-                                ->label('Ara Toplam (TRY)')
-                                ->numeric()
-                                ->readOnly()
-                                ->default(0)
-                                ->dehydrated(true),
-
-                            TextInput::make('shipping_amount')
-                                ->label('Kargo (TRY)')
-                                ->numeric()
-                                ->default(0)
-                                ->reactive()
-                                ->dehydrated(true)
-                                ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
-
-                            // 🔻 İNDİRİM % — shows the TRY equivalent
-                            TextInput::make('discount_percent')
-                                ->label('İndirim %')
-                                ->numeric()
-                                ->default(0)
-                                ->suffix('%')
-                                ->reactive()
-                                ->dehydrated(true)
-                                ->helperText(function (Get $get) {
-                                    $sub = (float)($get('subtotal') ?? 0);
-                                    $pct = (float)($get('discount_percent') ?? 0);
-                                    $amt = round($sub * $pct / 100, 2);
-                                    $txt = $sub > 0 ? '≈ ₺ ' . number_format($amt, 2, ',', '.') : '≈ ₺ 0,00';
-                                    return new HtmlString('<span class="text-gray-500">'.$txt.'</span>');
-                                })
-                                ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
-
-                            // 🔻 İNDİRİM (TRY) — shows the % equivalent
-                            TextInput::make('discount_amount')
-                                ->label('İndirim (TRY)')
-                                ->numeric()
-                                ->default(0)
-                                ->reactive()
-                                ->dehydrated(true)
-                                ->helperText(function (Get $get) {
-                                    $sub = (float)($get('subtotal') ?? 0);
-                                    $amt = (float)($get('discount_amount') ?? 0);
-                                    $pct = $sub > 0 ? round(($amt * 100) / $sub, 2) : 0;
-                                    // use comma decimals to match your UI
-                                    $pctStr = rtrim(rtrim(number_format($pct, 2, ',', '.'), '0'), ',');
-                                    return new HtmlString('<span class="text-gray-500">≈ '.$pctStr.' %</span>');
-                                })
-                                ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
-
-                            TextInput::make('kdv_percent')
-                                ->label('KDV %')
-                                ->numeric()
-                                ->default(0)
-                                ->suffix('%')
-                                ->reactive()
-                                ->dehydrated(true)
-                                ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
-
-                            TextInput::make('kdv_amount')
-                                ->label('KDV (TRY)')
-                                ->numeric()
-                                ->readOnly()
-                                ->default(0)
-                                ->dehydrated(true),
-
-                            TextInput::make('total')
-                                ->label('Toplam (TRY)')
-                                ->numeric()
-                                ->readOnly()
-                                ->default(0)
-                                ->dehydrated(true),
-                        ])
-                        ->columns(2),
-
-                        Section::make('Fatura Adresi')
+                        \Filament\Forms\Components\Section::make('Toplamlar')
                             ->schema([
-                                Grid::make(12)->schema([
-                                    TextInput::make('billing_name')->hidden()->dehydrated(),
-                                    TextInput::make('billing_phone')->label('Telefon')->tel()->required()
+                                \Filament\Forms\Components\TextInput::make('subtotal')
+                                    ->label('Ara Toplam (TRY)')
+                                    ->numeric()
+                                    ->readOnly()
+                                    ->default(0)
+                                    ->dehydrated(true),
+
+                                \Filament\Forms\Components\TextInput::make('shipping_amount')
+                                    ->label('Kargo (TRY)')
+                                    ->numeric()
+                                    ->default(0)
+                                    ->reactive()
+                                    ->dehydrated(true)
+                                    ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
+
+                                // percent <-> amount keep in sync
+                                \Filament\Forms\Components\TextInput::make('discount_percent')
+                                    ->label('İndirim %')
+                                    ->numeric()
+                                    ->default(0)
+                                    ->suffix('%')
+                                    ->reactive()
+                                    ->dehydrated(true)
+                                    ->afterStateUpdated(function ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) {
+                                        $sub = (float) (self::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
+                                        $pct = (float) self::toFloat($state ?? 0);
+                                        $amount = round($sub * $pct / 100, 2);
+                                        self::setRoot($set, 'discount_amount', $amount);
+                                        self::recalcTotals($set, $get);
+                                    }),
+
+                                \Filament\Forms\Components\TextInput::make('discount_amount')
+                                    ->label('İndirim (TRY)')
+                                    ->numeric()
+                                    ->default(0)
+                                    ->reactive()
+                                    ->dehydrated(true)
+                                    ->afterStateUpdated(function ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) {
+                                        $sub = (float) (self::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
+                                        $amt = (float) self::toFloat($state ?? 0);
+                                        $pct = $sub > 0 ? round(($amt / $sub) * 100, 2) : 0;
+                                        self::setRoot($set, 'discount_percent', $pct);
+                                        self::recalcTotals($set, $get);
+                                    }),
+
+                                \Filament\Forms\Components\TextInput::make('kdv_percent')
+                                    ->label('KDV %')
+                                    ->numeric()
+                                    ->default(0)
+                                    ->suffix('%')
+                                    ->reactive()
+                                    ->dehydrated(true)
+                                    ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
+
+                                \Filament\Forms\Components\TextInput::make('kdv_amount')
+                                    ->label('KDV (TRY)')
+                                    ->numeric()
+                                    ->readOnly()
+                                    ->default(0)
+                                    ->dehydrated(true),
+
+                                \Filament\Forms\Components\TextInput::make('total')
+                                    ->label('Toplam (TRY)')
+                                    ->numeric()
+                                    ->readOnly()
+                                    ->default(0)
+                                    ->dehydrated(true),
+                            ])
+                            ->columns(2),
+
+                        \Filament\Forms\Components\Section::make('Fatura Adresi')
+                            ->schema([
+                                \Filament\Forms\Components\Grid::make(12)->schema([
+                                    \Filament\Forms\Components\TextInput::make('billing_name')->hidden()->dehydrated(),
+                                    \Filament\Forms\Components\TextInput::make('billing_phone')->label('Telefon')->tel()->required()
                                         ->rules(['required', 'string', 'max:20'])->columnSpan(6),
-                                    Textarea::make('billing_address_line1')->label('Adres Satırı')->rows(2)->required()->columnSpan(12),
-                                    TextInput::make('billing_city')->label('Şehir / İlçe')->columnSpan(12),
-                                    Select::make('billing_state')->label('İl (Eyalet)')
+                                    \Filament\Forms\Components\Textarea::make('billing_address_line1')->label('Adres Satırı')->rows(2)->required()->columnSpan(12),
+                                    \Filament\Forms\Components\TextInput::make('billing_city')->label('Şehir / İlçe')->columnSpan(12),
+                                    \Filament\Forms\Components\Select::make('billing_state')->label('İl (Eyalet)')
                                         ->options(self::turkishProvinces())->searchable()->preload()->native(false)->columnSpan(12)
-                                        ->afterStateHydrated(function ($state, Set $set) {
+                                        ->afterStateHydrated(function ($state, \Filament\Forms\Set $set) {
                                             if (blank($state)) return;
                                             if (! str_starts_with((string) $state, 'TR')) {
                                                 $nameToCode = [];
                                                 foreach (self::turkishProvinces() as $code => $name) {
-                                                    $nameToCode[mb_strtolower($name)] = $code;
+                                                    $nameToCode[\Illuminate\Support\Str::of($name)->lower()] = $code;
                                                 }
-                                                $code = $nameToCode[mb_strtolower($state)] ?? $state;
+                                                $code = $nameToCode[\Illuminate\Support\Str::of((string) $state)->lower()] ?? $state;
                                                 $set('billing_state', $code);
                                             }
                                         }),
-                                    TextInput::make('billing_postcode')->label('Posta Kodu')->columnSpan(12),
-                                    TextInput::make('billing_country')->default('TR')->dehydrated()->hidden(),
+                                    \Filament\Forms\Components\TextInput::make('billing_postcode')->label('Posta Kodu')->columnSpan(12),
+                                    \Filament\Forms\Components\TextInput::make('billing_country')->default('TR')->dehydrated()->hidden(),
                                 ]),
                             ]),
                     ])
@@ -403,6 +407,7 @@ class OrderResource extends Resource
             ])
             ->columns(3);
     }
+
 
     protected static function fillBillingFromCustomer(Set $set, Get $get): void
     {
