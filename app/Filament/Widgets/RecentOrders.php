@@ -7,11 +7,15 @@ use Filament\Tables;
 use Filament\Tables\Table;
 use Filament\Tables\Tabs\Tab;
 use Filament\Widgets\TableWidget as BaseWidget;
-
+use Filament\Tables\Enums\FiltersLayout;
 class RecentOrders extends BaseWidget
 {
     protected static ?string $heading = 'Son Siparişler';
-
+    public function getColumnSpan(): int|string|array
+    {
+        // Make it take the full width
+        return 'full';
+    }
     protected function baseQuery()
     {
         return Order::query()->latest()
