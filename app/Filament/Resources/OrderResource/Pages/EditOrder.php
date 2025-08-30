@@ -21,8 +21,24 @@ class EditOrder extends EditRecord
     {
         parent::mount($record);
 
+        // ❌ Block editing completed orders
+        if (($this->record->status ?? null) === 'tamamlandi') {
+            abort(403, 'Tamamlanmış siparişler düzenlenemez.');
+        }
+
         // Build the "before" snapshot from DB
         $this->originalTotals = $this->totalsFrom($this->record->items()->get());
+    }
+
+    /**
+     * As a second line of defense, block save on completed records
+     * (e.g., if status flips to tamamlandi in a concurrent process).
+     */
+    protected function beforeSave(): void
+    {
+        if (($this->record->status ?? null) === 'tamamlandi') {
+            abort(403, 'Tamamlanmış siparişler düzenlenemez.');
+        }
     }
 
     /**
@@ -65,14 +81,10 @@ class EditOrder extends EditRecord
                 $after  = (float) ($currentTotals[$pid]   ?? 0);
                 $delta  = $after - $before;   // +ve => take from stock, -ve => return to stock
 
-                if ($delta == 0.0) {
-                    continue; // nothing changed for this product
-                }
+                if ($delta == 0.0) continue;
 
                 $product = Product::lockForUpdate()->find($pid);
-                if (!$product) {
-                    continue;
-                }
+                if (!$product) continue;
 
                 // Find the stock column your model actually uses.
                 $stockColumn = collect(['stock', 'stock_quantity', 'quantity'])
