@@ -5,32 +5,37 @@ namespace App\Filament\Widgets;
 use App\Models\Order;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Filament\Tables\Tabs\Tab;
 use Filament\Widgets\TableWidget as BaseWidget;
 use Filament\Tables\Enums\FiltersLayout;
+use Illuminate\Database\Eloquent\Builder;
+
 class RecentOrders extends BaseWidget
 {
     protected static ?string $heading = 'Son Siparişler';
+
     public function getColumnSpan(): int|string|array
     {
-        // Make it take the full width
+        // Full width inside the content area
         return 'full';
     }
-    protected function baseQuery()
+
+    protected function baseQuery(): Builder
     {
-        return Order::query()->latest()
+        return Order::query()
+            ->latest()
             ->when(
-                auth()->user()?->hasRole('seller') && !auth()->user()?->hasRole('admin'),
-                fn ($q) => $q->where('created_by_id', auth()->id())
+                auth()->user()?->hasRole('seller') && ! auth()->user()?->hasRole('admin'),
+                fn (Builder $q) => $q->where('created_by_id', auth()->id())
             );
     }
 
     public function table(Table $table): Table
     {
-        $base = fn () => Order::query()->latest()
+        $base = fn (): Builder => Order::query()
+            ->latest()
             ->when(
-                auth()->user()?->hasRole('seller') && !auth()->user()?->hasRole('admin'),
-                fn ($q) => $q->where('created_by_id', auth()->id())
+                auth()->user()?->hasRole('seller') && ! auth()->user()?->hasRole('admin'),
+                fn (Builder $q) => $q->where('created_by_id', auth()->id())
             );
 
         return $table
@@ -40,19 +45,28 @@ class RecentOrders extends BaseWidget
             ->filters([
                 Tables\Filters\Filter::make('tamamlandi')
                     ->label('Tamamlandı')
-                    ->query(fn ($q) => $q->whereIn('status', ['odendi','onaylandi'])),
+                    ->query(fn (Builder $query): Builder =>
+                        $query->whereIn('status', ['odendi', 'onaylandi'])
+                    ),
 
                 Tables\Filters\Filter::make('kargolandi')
                     ->label('Kargolandı')
-                    ->query(fn ($q) => $q->where('status', 'kargolandi')),
+                    ->query(fn (Builder $query): Builder =>
+                        $query->where('status', 'kargolandi')
+                    ),
             ])
-            // ->persistFiltersInSession() // optional if supported in your version
             ->filtersLayout(FiltersLayout::AboveContent)
 
             ->defaultPaginationPageOption(10)
             ->columns([
-                Tables\Columns\TextColumn::make('id')->label('#')->sortable(),
-                Tables\Columns\TextColumn::make('customer.name')->label('Müşteri')->searchable(),
+                Tables\Columns\TextColumn::make('id')
+                    ->label('#')
+                    ->sortable(),
+
+                Tables\Columns\TextColumn::make('customer.name')
+                    ->label('Müşteri')
+                    ->searchable(),
+
                 Tables\Columns\TextColumn::make('status')
                     ->label('Durum')
                     ->badge()
@@ -62,9 +76,19 @@ class RecentOrders extends BaseWidget
                         'info'    => 'kargolandi',
                         'danger'  => 'iptal',
                     ]),
-                Tables\Columns\TextColumn::make('total')->label('Toplam')->money('try', true),
-                Tables\Columns\TextColumn::make('creator.name')->label('Oluşturan')->toggleable(),
-                Tables\Columns\TextColumn::make('created_at')->label('Oluşturma')->since()->sortable(),
+
+                Tables\Columns\TextColumn::make('total')
+                    ->label('Toplam')
+                    ->money('TRY', true),
+
+                Tables\Columns\TextColumn::make('creator.name')
+                    ->label('Oluşturan')
+                    ->toggleable(),
+
+                Tables\Columns\TextColumn::make('created_at')
+                    ->label('Oluşturma')
+                    ->since()
+                    ->sortable(),
             ])
             ->actions([
                 Tables\Actions\Action::make('pdf')
@@ -82,5 +106,4 @@ class RecentOrders extends BaseWidget
                     ->url(fn (Order $r) => route('filament.admin.resources.orders.edit', ['record' => $r])),
             ]);
     }
-
 }
