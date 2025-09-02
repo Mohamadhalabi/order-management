@@ -320,23 +320,30 @@ class OrderResource extends Resource
                                     ->default(0)
                                     ->reactive()
                                     ->dehydrated(true)
-                                    ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
+                                    ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('shipping_amount', 0) : null)
+                                    ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
+                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => OrderResource::recalcTotals($set, $get)),
+
 
                                 // percent <-> amount keep in sync
                                 \Filament\Forms\Components\TextInput::make('discount_percent')
-                                    ->label('İndirim %')
-                                    ->numeric()
-                                    ->default(0)
-                                    ->suffix('%')
-                                    ->reactive()
-                                    ->dehydrated(true)
-                                    ->afterStateUpdated(function ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) {
-                                        $sub = (float) (self::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
-                                        $pct = (float) self::toFloat($state ?? 0);
-                                        $amount = round($sub * $pct / 100, 2);
-                                        self::setRoot($set, 'discount_amount', $amount);
-                                        self::recalcTotals($set, $get);
-                                    }),
+                                ->label('İndirim %')
+                                ->numeric()
+                                ->default(0)
+                                ->suffix('%')
+                                ->reactive()
+                                ->dehydrated(true)
+                                // when loading an existing record that has null, force 0 into the field
+                                ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_percent', 0) : null)
+                                // when saving, never allow null to hit the model
+                                ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
+                                ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                    $sub = (float) (OrderResource::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
+                                    $pct = (float) OrderResource::toFloat($state ?? 0);
+                                    $amount = round($sub * $pct / 100, 2);
+                                    OrderResource::setRoot($set, 'discount_amount', $amount);
+                                    OrderResource::recalcTotals($set, $get);
+                                }),
 
                                 \Filament\Forms\Components\TextInput::make('discount_amount')
                                     ->label('İndirim (TRY)')
@@ -344,22 +351,26 @@ class OrderResource extends Resource
                                     ->default(0)
                                     ->reactive()
                                     ->dehydrated(true)
-                                    ->afterStateUpdated(function ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) {
-                                        $sub = (float) (self::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
-                                        $amt = (float) self::toFloat($state ?? 0);
+                                    ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_amount', 0) : null)
+                                    ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
+                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                        $sub = (float) (OrderResource::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
+                                        $amt = (float) OrderResource::toFloat($state ?? 0);
                                         $pct = $sub > 0 ? round(($amt / $sub) * 100, 2) : 0;
-                                        self::setRoot($set, 'discount_percent', $pct);
-                                        self::recalcTotals($set, $get);
+                                        OrderResource::setRoot($set, 'discount_percent', $pct);
+                                        OrderResource::recalcTotals($set, $get);
                                     }),
 
                                 \Filament\Forms\Components\TextInput::make('kdv_percent')
-                                    ->label('KDV %')
-                                    ->numeric()
-                                    ->default(0)
-                                    ->suffix('%')
-                                    ->reactive()
-                                    ->dehydrated(true)
-                                    ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
+                                ->label('KDV %')
+                                ->numeric()
+                                ->default(0)
+                                ->suffix('%')
+                                ->reactive()
+                                ->dehydrated(true)
+                                ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('kdv_percent', 0) : null)
+                                ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
+                                ->afterStateUpdated(fn ($state, Set $set, Get $get) => OrderResource::recalcTotals($set, $get)),
 
                                 \Filament\Forms\Components\TextInput::make('kdv_amount')
                                     ->label('KDV (TRY)')
