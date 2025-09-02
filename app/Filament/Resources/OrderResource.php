@@ -148,7 +148,7 @@ class OrderResource extends Resource
                             ->schema([
                                 \Filament\Forms\Components\Repeater::make('items')
                                     ->relationship()
-                                    ->live()
+                                    // ->live()
                                     ->minItems(1)
                                     ->required()
                                     ->defaultItems(1)
@@ -248,23 +248,25 @@ class OrderResource extends Resource
                                                         self::recalcTotals($set, $get);
                                                     }),
 
-                                                \Filament\Forms\Components\TextInput::make('qty')
-                                                    ->label('Adet')
-                                                    ->numeric()
-                                                    ->required()
-                                                    ->minValue(1)
-                                                    ->default(1)
-                                                    ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
-                                                    ->helperText(function (\Filament\Forms\Get $get) {
-                                                        $pid = $get('product_id');
-                                                        if (! $pid) return null;
-
-                                                        $p = \App\Models\Product::find($pid);
-                                                        $live = (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
-                                                        $style = $live > 0 ? 'color:#16a34a;font-weight:600;' : 'color:#dc2626;font-weight:600;';
-                                                        return new \Illuminate\Support\HtmlString("<span style=\"{$style}\">Stok: {$live}</span>");
-                                                    })
-                                                    ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
+                                            \Filament\Forms\Components\TextInput::make('qty')
+                                                ->label('Adet')
+                                                ->numeric()
+                                                ->rule('integer')      // validate as integer
+                                                ->required()
+                                                ->minValue(1)
+                                                ->default(1)
+                                                ->live(onBlur: true)   // ⬅️ only push state when focus leaves, avoids mid-typing rerenders
+                                                ->dehydrateStateUsing(fn ($state) => max(1, (int) ($state ?? 1))) // always persist a clean int >= 1
+                                                ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
+                                                ->helperText(function (\Filament\Forms\Get $get) {
+                                                    $pid = $get('product_id');
+                                                    if (! $pid) return null;
+                                                    $p = \App\Models\Product::find($pid);
+                                                    $live = (int) ($p->stock ?? $p->stock_quantity ?? $p->quantity ?? 0);
+                                                    $style = $live > 0 ? 'color:#16a34a;font-weight:600;' : 'color:#dc2626;font-weight:600;';
+                                                    return new \Illuminate\Support\HtmlString("<span style=\"{$style}\">Stok: {$live}</span>");
+                                                })
+                                                ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
 
                                                 \Filament\Forms\Components\TextInput::make('unit_price')
                                                     ->label('Birim Fiyat')
@@ -272,6 +274,7 @@ class OrderResource extends Resource
                                                     ->required()
                                                     ->minValue(0)
                                                     ->default(0)
+                                                    ->live(onBlur: true)   // ⬅️ key change
                                                     ->reactive()
                                                     ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                     ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
@@ -489,20 +492,44 @@ class OrderResource extends Resource
 
     public static function table(Table $table): Table
     {
-        $isSeller = auth()->user()?->hasRole('seller') && !auth()->user()?->hasRole('admin');
+        $isSeller = auth()->user()?->hasRole('seller') && ! auth()->user()?->hasRole('admin');
 
         return $table
             ->query(fn () => Order::query()
                 ->when($isSeller, fn ($q) => $q->where('created_by_id', auth()->id()))
             )
             ->filters([
-                \Filament\Tables\Filters\Filter::make('kargolandi')
-                    ->label('Kargolandı')
-                    ->query(fn ($query) => $query->where('status', 'kargolandi')),
+                Filter::make('durumlar')
+                    ->label('Durum')
+                    ->form([
+                        \Filament\Forms\Components\Toggle::make('show_kargolandi')->label('Kargolandı')->inline(false),
+                        \Filament\Forms\Components\Toggle::make('show_tamamlandi')->label('Tamamlandı')->inline(false),
+                    ])
+                    ->columns(2)
+                    // both OFF on first load → hide them
+                    ->default([
+                        'show_kargolandi' => false,
+                        'show_tamamlandi' => false,
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $selected = [];
+                        if (!empty($data['show_kargolandi']))  $selected[] = 'kargolandi';
+                        if (!empty($data['show_tamamlandi']))  $selected[] = 'tamamlandi';
 
-                \Filament\Tables\Filters\Filter::make('tamamlandi')
-                    ->label('Tamamlandı')
-                    ->query(fn ($query) => $query->where('status', 'tamamlandi')),
+                        if (empty($selected)) {
+                            // No toggles → show everything EXCEPT kargolandi & tamamlandi
+                            return $query->whereNotIn('status', ['kargolandi', 'tamamlandi']);
+                        }
+
+                        // Any toggle ON → show ONLY the selected statuses
+                        return $query->whereIn('status', $selected);
+                    })
+                    ->indicateUsing(function (array $data): array {
+                        $chips = [];
+                        if (!empty($data['show_kargolandi'])) $chips[] = 'Yalnızca: Kargolandı';
+                        if (!empty($data['show_tamamlandi'])) $chips[] = 'Yalnızca: Tamamlandı';
+                        return $chips;
+                    }),
             ])
             ->filtersLayout(\Filament\Tables\Enums\FiltersLayout::AboveContent)
             ->columns([
@@ -524,7 +551,6 @@ class OrderResource extends Resource
                         'danger'  => 'iptal',
                     ]),
 
-                // Applied discount % (computed from subtotal & discount_amount)
                 Tables\Columns\TextColumn::make('kdv_percent')
                     ->label('KDV %')
                     ->state(fn (Order $r) => (float) ($r->kdv_percent ?? 0))
@@ -533,7 +559,6 @@ class OrderResource extends Resource
                     )
                     ->suffix(' %')
                     ->toggleable(),
-
 
                 Tables\Columns\TextColumn::make('discount_amount')
                     ->label('İndirim')
@@ -553,29 +578,28 @@ class OrderResource extends Resource
                     ->since()
                     ->sortable(),
             ])
-                ->actions([
-                    Tables\Actions\EditAction::make()
-                        ->label('Düzenle')
-                        ->visible(fn ($record) => $record->status !== 'tamamlandi'),
+            ->actions([
+                Tables\Actions\EditAction::make()
+                    ->label('Düzenle')
+                    ->visible(fn ($record) => $record->status !== 'tamamlandi'),
 
-                    Tables\Actions\Action::make('pdf')
-                        ->label('PDF')
-                        ->icon('heroicon-o-document-text')
-                        ->button()
-                        ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
-                        ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
+                Tables\Actions\Action::make('pdf')
+                    ->label('PDF')
+                    ->icon('heroicon-o-document-text')
+                    ->button()
+                    ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
+                    ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
 
-                    Tables\Actions\DeleteAction::make()
-                        ->label('Sil')
-                        ->icon('heroicon-o-trash')
-                        ->color('danger')
-                        ->requiresConfirmation()
-                        ->modalHeading('Siparişi Sil')
-                        ->modalDescription('Bu işlem geri alınamaz. Siparişi kalıcı olarak silmek istediğinizden emin misiniz?')
-                        ->visible(fn ($record) => $record->status !== 'tamamlandi'),
-                ])
-
-                ->bulkActions([
+                Tables\Actions\DeleteAction::make()
+                    ->label('Sil')
+                    ->icon('heroicon-o-trash')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalHeading('Siparişi Sil')
+                    ->modalDescription('Bu işlem geri alınamaz. Siparişi kalıcı olarak silmek istediğinizden emin misiniz?')
+                    ->visible(fn ($record) => $record->status !== 'tamamlandi'),
+            ])
+            ->bulkActions([
                 Tables\Actions\DeleteBulkAction::make()
                     ->label('Seçilenleri Sil')
                     ->color('danger')
@@ -583,9 +607,9 @@ class OrderResource extends Resource
                     ->modalHeading('Seçilen Siparişleri Sil')
                     ->modalDescription('Bu işlem geri alınamaz. Seçilen siparişleri silmek istediğinizden emin misiniz?'),
             ])
-
             ->defaultSort('id', 'desc');
     }
+
 
 
     public static function getPages(): array
