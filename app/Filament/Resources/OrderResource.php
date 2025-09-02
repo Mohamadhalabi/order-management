@@ -525,19 +525,15 @@ class OrderResource extends Resource
                     ]),
 
                 // Applied discount % (computed from subtotal & discount_amount)
-                Tables\Columns\TextColumn::make('discount_percent')
-                    ->label('İndirim %')
-                    ->state(function (Order $r) {
-                        $sub  = (float) ($r->subtotal ?? 0);
-                        $disc = (float) ($r->discount_amount ?? 0);
-                        if ($sub <= 0) return 0;
-                        return round(($disc * 100) / $sub, 2);
-                    })
+                Tables\Columns\TextColumn::make('kdv_percent')
+                    ->label('KDV %')
+                    ->state(fn (Order $r) => (float) ($r->kdv_percent ?? 0))
                     ->formatStateUsing(fn ($state) =>
                         rtrim(rtrim(number_format((float) $state, 2, ',', '.'), '0'), ',')
                     )
                     ->suffix(' %')
                     ->toggleable(),
+
 
                 Tables\Columns\TextColumn::make('discount_amount')
                     ->label('İndirim')
@@ -557,18 +553,37 @@ class OrderResource extends Resource
                     ->since()
                     ->sortable(),
             ])
-            ->actions([
-                Tables\Actions\EditAction::make()
-                    ->label('Düzenle')
-                    ->visible(fn ($record) => $record->status !== 'tamamlandi'),
+                ->actions([
+                    Tables\Actions\EditAction::make()
+                        ->label('Düzenle')
+                        ->visible(fn ($record) => $record->status !== 'tamamlandi'),
 
-                Tables\Actions\Action::make('pdf')
-                    ->label('PDF')
-                    ->icon('heroicon-o-document-text')
-                    ->button()
-                    ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
-                    ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
+                    Tables\Actions\Action::make('pdf')
+                        ->label('PDF')
+                        ->icon('heroicon-o-document-text')
+                        ->button()
+                        ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
+                        ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
+
+                    Tables\Actions\DeleteAction::make()
+                        ->label('Sil')
+                        ->icon('heroicon-o-trash')
+                        ->color('danger')
+                        ->requiresConfirmation()
+                        ->modalHeading('Siparişi Sil')
+                        ->modalDescription('Bu işlem geri alınamaz. Siparişi kalıcı olarak silmek istediğinizden emin misiniz?')
+                        ->visible(fn ($record) => $record->status !== 'tamamlandi'),
+                ])
+
+                ->bulkActions([
+                Tables\Actions\DeleteBulkAction::make()
+                    ->label('Seçilenleri Sil')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalHeading('Seçilen Siparişleri Sil')
+                    ->modalDescription('Bu işlem geri alınamaz. Seçilen siparişleri silmek istediğinizden emin misiniz?'),
             ])
+
             ->defaultSort('id', 'desc');
     }
 
