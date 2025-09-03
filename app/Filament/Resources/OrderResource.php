@@ -275,7 +275,7 @@ class OrderResource extends Resource
                                                     ->minValue(0)
                                                     ->default(0)
                                                     ->live(onBlur: true)   // ⬅️ key change
-                                                    ->reactive()
+                                                    // ->reactive()
                                                     ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                     ->afterStateUpdated(fn ($state, \Filament\Forms\Set $set, \Filament\Forms\Get $get) => self::recalcTotals($set, $get)),
 
@@ -327,14 +327,14 @@ class OrderResource extends Resource
                                     ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => OrderResource::recalcTotals($set, $get)),
 
-
                                 // percent <-> amount keep in sync
                                 \Filament\Forms\Components\TextInput::make('discount_percent')
                                 ->label('İndirim %')
                                 ->numeric()
                                 ->default(0)
                                 ->suffix('%')
-                                ->reactive()
+                                ->live(onBlur: true)   // ⬅️ only push state when focus leaves, avoids mid-typing rerenders
+                                // ->reactive()
                                 ->dehydrated(true)
                                 // when loading an existing record that has null, force 0 into the field
                                 ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_percent', 0) : null)
@@ -348,28 +348,32 @@ class OrderResource extends Resource
                                     OrderResource::recalcTotals($set, $get);
                                 }),
 
-                                \Filament\Forms\Components\TextInput::make('discount_amount')
-                                    ->label('İndirim (TRY)')
-                                    ->numeric()
-                                    ->default(0)
-                                    ->reactive()
-                                    ->dehydrated(true)
-                                    ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_amount', 0) : null)
-                                    ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
-                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                        $sub = (float) (OrderResource::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
-                                        $amt = (float) OrderResource::toFloat($state ?? 0);
-                                        $pct = $sub > 0 ? round(($amt / $sub) * 100, 2) : 0;
-                                        OrderResource::setRoot($set, 'discount_percent', $pct);
-                                        OrderResource::recalcTotals($set, $get);
-                                    }),
+                            \Filament\Forms\Components\TextInput::make('discount_amount')
+                                ->label('İndirim (TRY)')
+                                ->numeric()
+                                ->default(0)
+                                ->live(onBlur: true)   // keep this
+                                // ->reactive()        // ← remove this line
+                                ->dehydrated(true)
+                                ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_amount', 0) : null)
+                                ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
+                                ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                    $sub = (float) (OrderResource::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
+                                    $amt = (float) OrderResource::toFloat($state ?? 0);
+                                    $pct = $sub > 0 ? round(($amt / $sub) * 100, 2) : 0;
+                                    // only update the percent; totals will use max(amount, percent)
+                                    OrderResource::setRoot($set, 'discount_percent', $pct);
+                                    OrderResource::recalcTotals($set, $get);
+                                }),
+
 
                                 \Filament\Forms\Components\TextInput::make('kdv_percent')
                                 ->label('KDV %')
                                 ->numeric()
                                 ->default(0)
                                 ->suffix('%')
-                                ->reactive()
+                                // ->reactive()
+                                ->live(onBlur: true)   // ⬅️ only push state when focus leaves, avoids mid-typing rerenders
                                 ->dehydrated(true)
                                 ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('kdv_percent', 0) : null)
                                 ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
@@ -457,36 +461,42 @@ class OrderResource extends Resource
 
     protected static function recalcTotals(Set $set, Get $get): void
     {
+        // small debounce
+        usleep(400000);
+
         $items = $get('../../items') ?? $get('items') ?? [];
-        $sub = 0;
+        $sub = 0.0;
 
         foreach ($items as $row) {
-            $qty   = (float)($row['qty'] ?? 0);
-            $price = (float)($row['unit_price'] ?? 0);
+            $qty   = (float) ($row['qty'] ?? 0);
+            $price = (float) ($row['unit_price'] ?? 0);
             $sub  += $qty * $price;
         }
 
-        // ✅ round Subtotal so you don't see 6378.71999999
         $sub = round($sub, 2);
 
-        $kdvPercent      = (float)($get('../../kdv_percent') ?? $get('kdv_percent') ?? 0);
-        $discountPercent = (float)($get('../../discount_percent') ?? $get('discount_percent') ?? 0);
-        $discountAmount  = (float)($get('../../discount_amount') ?? $get('discount_amount') ?? 0);
+        $kdvPercent      = (float) ($get('../../kdv_percent')      ?? $get('kdv_percent')      ?? 0);
+        $discountPercent = (float) ($get('../../discount_percent') ?? $get('discount_percent') ?? 0);
+        $discountAmount  = (float) ($get('../../discount_amount')  ?? $get('discount_amount')  ?? 0);
+        $shippingAmount  = (float) ($get('../../shipping_amount')  ?? $get('shipping_amount')  ?? 0); // ⬅️ read shipping
 
-        // Percentage-based discount
+        // percentage-based discount vs fixed
         $percentDiscount = round($sub * $discountPercent / 100, 2);
+        $finalDiscount   = min(max($discountAmount, $percentDiscount), $sub);
 
-        // Final discount uses the higher of amount vs percent (your business rule)
-        $finalDiscount = max($discountAmount, $percentDiscount);
-        $finalDiscount = min($finalDiscount, $sub); // cannot exceed subtotal
+        // tax on (subtotal - discount) — shipping NOT taxed (keep as your rule)
+        $taxBase   = max($sub - $finalDiscount, 0);
+        $kdvAmount = round($taxBase * $kdvPercent / 100, 2);
 
-        $kdvAmount = round(($sub - $finalDiscount) * $kdvPercent / 100, 2);
-
+        // write back
         self::setRoot($set, 'subtotal', $sub);
         self::setRoot($set, 'discount_amount', $finalDiscount);
         self::setRoot($set, 'kdv_amount', $kdvAmount);
-        self::setRoot($set, 'total', round($sub - $finalDiscount + $kdvAmount, 2));
+
+        // ⬅️ include shipping in total (matches recomputeTotalsFromArray)
+        self::setRoot($set, 'total', round($taxBase + $shippingAmount + $kdvAmount, 2));
     }
+
 
 
 
