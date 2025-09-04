@@ -179,7 +179,9 @@ return [
          *
          * @var string
          */
-        'default_font' => 'Noto Sans',
+        'default_font' => 'Amiri',
+        
+        'isHtml5ParserEnabled' => true,
 
         /**
          * Image DPI setting

@@ -59,7 +59,25 @@
     <meta charset="utf-8">
     <title>{{ $brand['name'] ?? 'Fatura' }}</title>
     <style>
-        body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #111; }
+ * { font-family: DejaVu Sans, sans-serif; }
+
+            /* @font-face {
+                font-family: 'Amiri';
+                font-style: normal;
+                font-weight: normal;
+                src: url("{{ storage_path('fonts/Amiri-Regular.ttf') }}") format('truetype');
+            }
+            @font-face {
+                font-family: 'Amiri';
+                font-style: normal;
+                font-weight: bold;
+                src: url("{{ storage_path('fonts/Amiri-Bold.ttf') }}") format('truetype');
+            }
+
+            html, body {
+                font-family: 'Amiri', DejaVu Sans, sans-serif;
+            } */
+        body { font-size: 11px; color: #111; }
         h1,h2,h3,h4 { margin: 0; }
         .brand { color: {{ $brandColor }}; }
         .muted { color: #666; }
