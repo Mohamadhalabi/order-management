@@ -12,17 +12,17 @@ use Filament\Pages\Page;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Maatwebsite\Excel\Facades\Excel;
 
-class ImportProducts extends Page
+class ImportBranchStock extends Page
 {
     use InteractsWithForms;
 
     protected static ?string $navigationIcon  = 'heroicon-o-arrow-up-tray';
-    protected static ?string $navigationGroup = 'Catalog';
-    protected static ?string $navigationLabel = 'Update Stock';
-    protected static ?string $title           = 'Update Stock';
-    protected static ?string $breadcrumb      = 'Update Stock';
+    protected static ?string $navigationGroup = 'Katalog';
+    protected static ?string $navigationLabel = 'Stok Güncelle (Şube)';
+    protected static ?string $title           = 'Stok Güncelle (Şube)';
+    protected static ?string $breadcrumb      = 'Stok Güncelle (Şube)';
 
-    protected static string $view = 'filament.pages.import-products';
+    protected static string $view = 'filament.pages.import-branch-stock';
 
     public static function shouldRegisterNavigation(): bool
     {
@@ -34,7 +34,6 @@ class ImportProducts extends Page
         return static::shouldRegisterNavigation();
     }
 
-    // Form state
     public array $data = [
         'branch_id' => null,
         'file'      => null,
@@ -49,9 +48,8 @@ class ImportProducts extends Page
     {
         return $form
             ->schema([
-                // ⬇️ NEW: Branch dropdown
                 Forms\Components\Select::make('branch_id')
-                    ->label('Branch')
+                    ->label('Şube')
                     ->options(fn () => Branch::query()->orderBy('name')->pluck('name', 'id'))
                     ->searchable()
                     ->required()
@@ -59,35 +57,31 @@ class ImportProducts extends Page
 
                 Forms\Components\FileUpload::make('file')
                     ->label('Excel / CSV')
-                    ->helperText('Expected columns: sku, stock. Only stock is updated for the selected branch.')
+                    ->helperText('Beklenen sütunlar: sku, stock. Yalnızca seçilen şubenin stoğu güncellenir. SKU gerekli.')
                     ->acceptedFileTypes([
                         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         'application/vnd.ms-excel',
                         'text/csv',
                     ])
                     ->required()
-                    ->storeFiles(false), // keep tmp so we get TemporaryUploadedFile
+                    ->storeFiles(false),
             ])
             ->statePath('data');
     }
 
     public function submit(): void
     {
-        $state    = $this->form->getState();
-        $branchId = (int) ($state['branch_id'] ?? 0);
-        $file     = $state['file'] ?? null;
+        $state     = $this->form->getState();
+        $branchId  = (int) ($state['branch_id'] ?? 0);
+        $file      = $state['file'] ?? null;
 
         if (! $branchId) {
-            Notification::make()->title('Please choose a branch.')->danger()->send();
+            Notification::make()->title('Lütfen bir şube seçin.')->danger()->send();
             return;
         }
 
         if (! $file instanceof TemporaryUploadedFile) {
-            Notification::make()
-                ->title('Invalid upload')
-                ->body('Please select the file again and retry.')
-                ->danger()
-                ->send();
+            Notification::make()->title('Lütfen bir dosya seçin.')->danger()->send();
             return;
         }
 
@@ -95,19 +89,19 @@ class ImportProducts extends Page
             $import = new BranchStockImport($branchId);
             Excel::import($import, $file->getRealPath());
 
-            // clear only the file field; keep selected branch
+            // clear only the file field, keep the selected branch
             $state['file'] = null;
             $this->form->fill($state);
 
             Notification::make()
-                ->title('Stock update completed')
-                ->body("Updated: {$import->ok} • Skipped: {$import->skipped}")
+                ->title('Stok güncelleme tamamlandı')
+                ->body("Başarılı: {$import->ok} • Atlanan: {$import->skipped}")
                 ->success()
                 ->send();
 
         } catch (\Throwable $e) {
             Notification::make()
-                ->title('Import failed')
+                ->title('İçe aktarma başarısız')
                 ->body($e->getMessage())
                 ->danger()
                 ->send();

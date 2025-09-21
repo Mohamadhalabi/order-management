@@ -43,4 +43,10 @@ class Product extends Model
         $col = $this->stockColumn();
         $this->forceFill([$col => $this->currentStock() + max($by, 0)])->saveQuietly();
     }
+
+    public function branchStocks()
+    {
+        return $this->hasMany(\App\Models\ProductBranchStock::class);
+    }
+
 }

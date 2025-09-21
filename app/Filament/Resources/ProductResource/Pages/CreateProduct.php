@@ -1,34 +1,36 @@
 <?php
+// app/Filament/Resources/ProductResource/Pages/CreateProduct.php
 
 namespace App\Filament\Resources\ProductResource\Pages;
 
 use App\Filament\Resources\ProductResource;
+use App\Models\Branch;
+use App\Models\ProductBranchStock;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreateProduct extends CreateRecord
 {
     protected static string $resource = ProductResource::class;
 
-    protected static ?string $title      = 'Ürün Oluştur';
-    protected static ?string $breadcrumb = 'Oluştur';
+    protected array $branchStockData = [];
 
-    // Remove "Create & create another"
-    protected function hasCreateAnother(): bool
+    protected function mutateFormDataBeforeCreate(array $data): array
     {
-        return false;
+        $this->branchStockData = $data['branch_stock'] ?? [];
+        unset($data['branch_stock']); // not a column on products
+        return $data;
     }
 
-    // Translate the two visible actions
-    protected function getFormActions(): array
+    protected function afterCreate(): void
     {
-        return [
-            $this->getCreateFormAction()->label('Oluştur'),
-            $this->getCancelFormAction()->label('İptal'),
-        ];
-    }
+        $product = $this->record;
 
-    protected function getRedirectUrl(): string
-    {
-        return $this->getResource()::getUrl('index');
+        foreach (Branch::all() as $branch) {
+            $qty = (int) ($this->branchStockData[$branch->id] ?? 0);
+            ProductBranchStock::updateOrCreate(
+                ['product_id' => $product->id, 'branch_id' => $branch->id],
+                ['stock' => $qty],
+            );
+        }
     }
 }

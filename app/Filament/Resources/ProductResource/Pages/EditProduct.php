@@ -1,35 +1,36 @@
 <?php
+// app/Filament/Resources/ProductResource/Pages/EditProduct.php
 
 namespace App\Filament\Resources\ProductResource\Pages;
 
 use App\Filament\Resources\ProductResource;
+use App\Models\Branch;
+use App\Models\ProductBranchStock;
 use Filament\Resources\Pages\EditRecord;
-use Filament\Actions;
 
 class EditProduct extends EditRecord
 {
     protected static string $resource = ProductResource::class;
 
-    protected static ?string $title = 'Ürünü Düzenle';
-    protected static ?string $breadcrumb = 'Düzenle';
+    protected array $branchStockData = [];
 
-    protected function getHeaderActions(): array
+    protected function mutateFormDataBeforeSave(array $data): array
     {
-        return [
-            Actions\DeleteAction::make()->label('Sil'),
-        ];
+        $this->branchStockData = $data['branch_stock'] ?? [];
+        unset($data['branch_stock']); // not a column on products
+        return $data;
     }
 
-    protected function getFormActions(): array
+    protected function afterSave(): void
     {
-        return [
-            $this->getSaveFormAction()->label('Kaydet'),
-            $this->getCancelFormAction()->label('İptal'),
-        ];
-    }
+        $product = $this->record;
 
-    protected function getRedirectUrl(): string
-    {
-        return $this->getResource()::getUrl('index');
+        foreach (Branch::all() as $branch) {
+            $qty = (int) ($this->branchStockData[$branch->id] ?? 0);
+            ProductBranchStock::updateOrCreate(
+                ['product_id' => $product->id, 'branch_id' => $branch->id],
+                ['stock' => $qty],
+            );
+        }
     }
 }

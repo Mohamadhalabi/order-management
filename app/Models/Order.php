@@ -14,6 +14,7 @@ class Order extends Model
         'status',
         'notes',
 
+        'branch_id',
         'subtotal',
         'shipping_amount',
         'kdv_percent',
@@ -79,5 +80,9 @@ class Order extends Model
         if (! $this->pdf_path) return null;
 
         return \Storage::url($this->pdf_path);
+    }
+    public function branch()
+    {
+        return $this->belongsTo(\App\Models\Branch::class);
     }
 }

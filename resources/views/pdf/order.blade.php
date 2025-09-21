@@ -11,10 +11,10 @@
         return rtrim(rtrim($s, '0'), ',');
     };
 
-    /** Build a Dompdf-friendly local path for images (public/storage/...) */
+    /** Build a Dompdf-friendly local/public path for images */
     $toPath = function (?string $path) {
         if (!$path) return null;
-        if (Str::startsWith($path, ['data:', 'http://', 'https://'])) return $path;
+        if (Str::startsWith($path, ['data:', 'http://', 'https://', '/', 'file://'])) return $path;
         $relative = Str::startsWith($path, 'storage/') ? $path : ('storage/' . ltrim($path, '/'));
         return public_path($relative);
     };
@@ -26,7 +26,10 @@
     $createdAt  = optional($order->created_at)->timezone(config('app.timezone', 'UTC'));
     $brandColor = $brand['color'] ?? '#2D83B0';
 
-    // ---- Totals (mirror server-side logic exactly) ----
+    // Hard-coded QR (smaller)
+    $qr = file_exists(public_path('images/qr-code.png')) ? public_path('images/qr-code.png') : null;
+
+    // ---- Totals (mirror server logic) ----
     $calcSubtotal = function() use ($items) {
         return (float) $items->sum(function($r){
             $q = (float) ($r->qty ?? 1);
@@ -43,14 +46,11 @@
     $discountFromPct = round($subtotal * $discountPercent / 100, 2);
     $finalDiscount   = min(max($discountSaved, $discountFromPct), $subtotal);
 
-    // Applied (effective) percent for display
-    $appliedPercent  = $subtotal > 0 ? round($finalDiscount * 100 / $subtotal, 2) : 0;
-
     $kdvPercent      = (float)($order->kdv_percent ?? 0);
-    $taxBase         = max($subtotal - $finalDiscount, 0);
+    $taxBase         = max($subtotal - $finalDiscount, 0);           // Toplam after discount
     $kdvAmount       = isset($order->kdv_amount) ? (float)$order->kdv_amount : round($taxBase * $kdvPercent / 100, 2);
 
-    $grandTotal      = isset($order->total) ? (float)$order->total : ($taxBase + $shipping + $kdvAmount);
+    $grandTotal      = isset($order->total) ? (float)$order->total : ($taxBase + $kdvAmount + $shipping); // final
 @endphp
 
 <!doctype html>
@@ -59,24 +59,7 @@
     <meta charset="utf-8">
     <title>{{ $brand['name'] ?? 'Fatura' }}</title>
     <style>
- * { font-family: DejaVu Sans, sans-serif; }
-
-            /* @font-face {
-                font-family: 'Amiri';
-                font-style: normal;
-                font-weight: normal;
-                src: url("{{ storage_path('fonts/Amiri-Regular.ttf') }}") format('truetype');
-            }
-            @font-face {
-                font-family: 'Amiri';
-                font-style: normal;
-                font-weight: bold;
-                src: url("{{ storage_path('fonts/Amiri-Bold.ttf') }}") format('truetype');
-            }
-
-            html, body {
-                font-family: 'Amiri', DejaVu Sans, sans-serif;
-            } */
+        * { font-family: DejaVu Sans, sans-serif; }
         body { font-size: 11px; color: #111; }
         h1,h2,h3,h4 { margin: 0; }
         .brand { color: {{ $brandColor }}; }
@@ -86,8 +69,10 @@
 
         .header { display: table; width: 100%; margin-bottom: 14px; }
         .header .left { display: table-cell; vertical-align: top; width: 60%; }
-        .header .right { display: table-cell; vertical-align: top; text-align: right; width: 40%; }
+        .header .right { display: table-cell; vertical-align: top; text-align: right; width: 40%; position: relative; }
         .logo { height: 36px; margin-bottom: 6px; }
+
+        .qr { width: 72px; height: 72px; object-fit: contain; display: inline-block; margin-top: 4px; margin-left: 8px; }
 
         .rule { height: 2px; background: {{ $brandColor }}; opacity: .15; margin: 8px 0 14px; }
 
@@ -110,19 +95,23 @@
         .two-col .left-pad  { padding-right: 6px; }
         .two-col .right-pad { padding-left: 6px; }
 
-        /* Items table can break across pages, but keep rows intact */
+        /* Items table can break across pages */
         table.items { page-break-inside: auto; }
         table.items tr { page-break-inside: avoid; page-break-after: auto; }
 
         /* Totals must stay together */
         .keep-together { page-break-inside: avoid; }
 
-        .totals { width: 340px; margin-left: auto; }
-        .totals td { border-left: none; border-right: none; }
-        .totals tr:first-child td { border-top: 1px solid #e5e7eb; }
-        .totals tr:last-child td { border-bottom: 1px solid #e5e7eb; }
+        /* === TOTALS: ONLY HORIZONTAL (bottom) BORDERS BETWEEN ROWS === */
+        .totals { width: 360px; margin-left: auto; border-collapse: separate; border-spacing: 0; }
+        .totals th, .totals td { padding: 8px 0; border: none !important; }  /* kill all vertical/side borders */
+        .totals tr > td { border-bottom: 1px solid #e5e7eb !important; }    /* add only bottom separators */
+        .totals tr:last-child > td { border-bottom: 1px solid #e5e7eb !important; } /* keep bottom under final row too */
+
         .totals .label { color: #374151; }
-        .totals .grand { font-weight: 700; }
+        .totals .val { text-align: right; white-space: nowrap; }
+        .totals .grand .label { font-weight: 700; }
+        .totals .grand .val   { font-weight: 700; }
     </style>
 </head>
 <body>
@@ -143,12 +132,19 @@
             @if(!empty($order->status))
                 <div class="badge" style="margin-top:6px;">{{ strtoupper($order->status) }}</div>
             @endif
+
+            {{-- QR at top-right (hard-coded) --}}
+            @if($qr)
+                <div>
+                    <img class="qr" src="{{ $qr }}" alt="QR">
+                </div>
+            @endif
         </div>
     </div>
 
     <div class="rule"></div>
 
-    {{-- Müşteri + Oluşturan (50% / 50%) --}}
+    {{-- Müşteri + Oluşturan --}}
     <table class="two-col" style="margin-bottom:12px;">
         <tr>
             <td class="col left-pad">
@@ -204,7 +200,7 @@
         </tr>
     </table>
 
-    {{-- ITEMS TABLE (can split across pages; rows stay intact) --}}
+    {{-- ITEMS TABLE --}}
     <h4 class="brand" style="margin: 10px 0 6px;">Kalemler</h4>
     <table class="items">
         <thead>
@@ -245,48 +241,31 @@
         </tbody>
     </table>
 
-    {{-- TOTALS (kept on the same page) --}}
+    {{-- TOTALS (only bottom borders between rows) --}}
     <div class="keep-together" style="margin-top:10px;">
         <table class="totals">
             <tr>
                 <td class="label">Ara Toplam</td>
-                <td class="right">&nbsp;₺&nbsp;{{ $fmt($subtotal) }}</td>
-            </tr>
-            <tr>
-                <td class="label">İndirim %</td>
-                <td class="right">{{ $fmtPct($appliedPercent) }} %</td>
+                <td class="val">&nbsp;₺&nbsp;{{ $fmt($subtotal) }}</td>
             </tr>
             <tr>
                 <td class="label">İndirim (TRY)</td>
-                <td class="right">−&nbsp;₺&nbsp;{{ $fmt($finalDiscount) }}</td>
+                <td class="val">−&nbsp;₺&nbsp;{{ $fmt($finalDiscount) }}</td>
             </tr>
             <tr>
-                <td class="label">Kargo</td>
-                <td class="right">&nbsp;₺&nbsp;{{ $fmt($shipping) }}</td>
+                <td class="label">Toplam</td>
+                <td class="val">&nbsp;₺&nbsp;{{ $fmt($taxBase) }}</td>
             </tr>
             <tr>
                 <td class="label">KDV %</td>
-                <td class="right">{{ $fmtPct($kdvPercent) }} %</td>
+                <td class="val">{{ $fmtPct($kdvPercent) }} %</td>
             </tr>
-            <tr>
-                <td class="label">KDV (TRY)</td>
-                <td class="right">&nbsp;₺&nbsp;{{ $fmt($kdvAmount) }}</td>
-            </tr>
-            <tr>
-                <td class="label grand">Toplam</td>
-                <td class="right grand">&nbsp;₺&nbsp;{{ $fmt($grandTotal) }}</td>
+            <tr class="grand">
+                <td class="label">Toplam</td>
+                <td class="val">&nbsp;₺&nbsp;{{ $fmt($grandTotal) }}</td>
             </tr>
         </table>
     </div>
-
-    @if(!empty($order->notes))
-        <div class="panel" style="margin-top:12px; padding:6px 8px;">
-            <h4 class="brand" style="margin-bottom:4px;">Sipariş Notu</h4>
-            <div class="small" style="white-space: pre-line; line-height:1.3; margin:0;">
-                {!! nl2br(trim(e($order->notes))) !!}
-            </div>
-        </div>
-    @endif
 
     <div class="footer" style="margin-top:12mm; color:#6b7280; font-size:10px; text-align:center;">
         Herhangi bir sorunuz için bizimle iletişime geçin:
