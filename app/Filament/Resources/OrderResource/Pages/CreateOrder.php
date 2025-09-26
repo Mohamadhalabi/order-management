@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\OrderResource\Pages;
 
 use App\Filament\Resources\OrderResource;
+use App\Services\BranchStockService;
+use App\Models\ProductBranchStock;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Filament\Actions;
 use Filament\Resources\Pages\CreateRecord;
@@ -13,102 +15,78 @@ class CreateOrder extends CreateRecord
 {
     protected static string $resource = OrderResource::class;
 
-    // Türkçe başlıklar
     protected static ?string $title = 'Sipariş Oluştur';
     protected static ?string $breadcrumb = 'Oluştur';
 
-    /** Submit / Cancel buttons */
     protected function getFormActions(): array
     {
         return [
-            Actions\Action::make('create')
-                ->label('Oluştur')
-                ->submit('create')
-                ->color('primary'),
-
-            Actions\Action::make('cancel')
-                ->label('İptal')
-                ->url(static::getResource()::getUrl('index')),
+            Actions\Action::make('create')->label('Oluştur')->submit('create')->color('primary'),
+            Actions\Action::make('cancel')->label('İptal')->url(static::getResource()::getUrl('index')),
         ];
     }
 
-    /**
-     * Kaydetmeden önce tutarları garantiye al ve minimum 1 kalem zorunlu kıl.
-     */
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $state   = $this->form->getRawState() ?: request()->input('data', []);
         $payload = array_merge($data, $state);
 
-        // En az 1 ürün şartı
         $items = $payload['items'] ?? [];
         if (empty($items)) {
             \Filament\Notifications\Notification::make()
                 ->title('Siparişe en az 1 ürün eklemelisiniz.')
-                ->danger()
-                ->send();
-
+                ->danger()->send();
             $this->addError('data.items', 'Siparişe en az 1 ürün eklemelisiniz.');
             $this->halt();
         }
 
-        // Sunucu tarafında toplamları yeniden hesapla
         $payload = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($payload);
-
-        // Oluşturan kullanıcı
         $payload['created_by_id'] = \Illuminate\Support\Facades\Auth::id();
 
         return $payload;
     }
 
     /**
-     * Kayıt oluşunca stokları düş ve PDF oluştur.
+     * After create:
+     *  - Deduct branch stock for each line (by ordered qty)
+     *  - Update each item's stock_snapshot to remaining stock in that branch
+     *  - Generate PDF
      */
     protected function afterCreate(): void
     {
-        $order = $this->record->fresh(['items.product', 'customer', 'creator']);
+        $order = $this->record->fresh(['items', 'customer', 'creator']);
 
-        // ---- STOK DÜŞÜŞÜ ----
-        DB::transaction(function () use ($order) {
+        // Convert items to simple arrays for the service
+        $newItems = $order->items->map(fn ($i) => [
+            'product_id' => (int) $i->product_id,
+            'qty'        => (int) $i->qty,
+        ])->values()->all();
+
+        // Apply branch-level stock moves
+        $remaining = BranchStockService::applyForCreateOrEdit(
+            oldBranchId: null,
+            newBranchId: (int) $order->branch_id,
+            oldItems: [],
+            newItems: $newItems
+        );
+
+        // Update stock_snapshot per item to remaining branch stock (optional but useful)
+        DB::transaction(function () use ($order, $remaining) {
             foreach ($order->items as $item) {
-                $product = $item->product;
-                if (! $product) {
-                    continue;
-                }
-
-                $qty = (int) ($item->qty ?? 0);
-                if ($qty <= 0) {
-                    continue;
-                }
-
-                // Hangi sütun stok tutuyor? (stock | stock_quantity | quantity)
-                $stockColumn = null;
-                foreach (['stock', 'stock_quantity', 'quantity'] as $c) {
-                    if (array_key_exists($c, $product->getAttributes()) || isset($product->{$c})) {
-                        $stockColumn = $c;
-                        break;
-                    }
-                }
-                $stockColumn ??= 'stock';
-
-                $current = (int) ($product->{$stockColumn} ?? 0);
-                $new     = max($current - $qty, 0);
-
-                // Üründe yeni stoğu sessizce kaydet
-                $product->forceFill([$stockColumn => $new])->saveQuietly();
-
-                // Kalemde yeni kalan stok bilgisini sakla
-                $item->stock_snapshot = $new;
+                $pid = (int) $item->product_id;
+                $left = $remaining[$pid] ?? ProductBranchStock::query()
+                    ->where('branch_id', $order->branch_id)
+                    ->where('product_id', $pid)
+                    ->value('stock');
+                $item->stock_snapshot = (int) ($left ?? 0);
                 $item->saveQuietly();
             }
         });
 
-        // ---- PDF ----
+        // PDF
         $pdf = Pdf::loadView('pdf.order', ['order' => $order->fresh(['items.product', 'customer', 'creator'])]);
-
         $path = "orders/{$order->id}.pdf";
         Storage::disk('public')->put($path, $pdf->output());
-
         $order->updateQuietly(['pdf_path' => $path]);
     }
 
