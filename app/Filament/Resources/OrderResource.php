@@ -175,6 +175,7 @@ class OrderResource extends Resource
                             ->schema([
                                 Repeater::make('items')
                                     ->relationship()
+                                    ->dehydrated(false)
                                     ->minItems(1)
                                     ->required()
                                     ->defaultItems(1)

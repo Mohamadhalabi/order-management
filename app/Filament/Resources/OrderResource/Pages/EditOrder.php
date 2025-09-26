@@ -46,8 +46,19 @@ class EditOrder extends EditRecord
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        // keep your totals logic centralized
-        return OrderResource::recomputeTotalsFromArray($data);
+        // Raw state ALWAYS contains relationship repeater rows, even when not dehydrated.
+        $state = $this->form->getRawState();
+
+        $data['items'] = $state['items'] ?? [];  // ensure items are present for recompute
+        return \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
+    }
+
+
+    protected function afterFill(): void
+    {
+        $state  = $this->form->getRawState(); // includes items[]
+        $state  = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($state);
+        $this->form->fill($state);            // push computed subtotal/kdv/total into form
     }
 
     /**
@@ -91,4 +102,5 @@ class EditOrder extends EditRecord
         $this->originalBranchId = (int) $order->branch_id;
         $this->originalItems    = $this->itemsArrayFromDb();
     }
+    
 }
