@@ -104,9 +104,9 @@
 
         /* === TOTALS: ONLY HORIZONTAL (bottom) BORDERS BETWEEN ROWS === */
         .totals { width: 360px; margin-left: auto; border-collapse: separate; border-spacing: 0; }
-        .totals th, .totals td { padding: 8px 0; border: none !important; }  /* kill all vertical/side borders */
-        .totals tr > td { border-bottom: 1px solid #e5e7eb !important; }    /* add only bottom separators */
-        .totals tr:last-child > td { border-bottom: 1px solid #e5e7eb !important; } /* keep bottom under final row too */
+        .totals th, .totals td { padding: 8px 0; border: none !important; }
+        .totals tr > td { border-bottom: 1px solid #e5e7eb !important; }
+        .totals tr:last-child > td { border-bottom: 1px solid #e5e7eb !important; }
 
         .totals .label { color: #374151; }
         .totals .val { text-align: right; white-space: nowrap; }
@@ -154,7 +154,7 @@
                         <tr>
                             <td style="border:none; padding: 0 6px 2px 0;"><strong>Ad:</strong></td>
                             <td style="border:none; padding: 0 0 2px 0;">
-                                {{ $order->billing_name ?? ($customer->name ?? '—') }}
+                               {{ ($customer->name ?? null) ?: ($order->billing_name ?? '—') }}
                             </td>
                         </tr>
                         <tr>
@@ -192,6 +192,13 @@
                         <tr>
                             <td style="border:none; padding:0 6px 0 0;"><strong>E-posta:</strong></td>
                             <td style="border:none; padding:0;">{{ $creator->email }}</td>
+                        </tr>
+                        @endif
+
+                        @if(!empty($order->notes))
+                        <tr>
+                            <td style="border:none; padding:6px 6px 0 0; vertical-align: top;"><strong>Not:</strong></td>
+                            <td style="border:none; padding:6px 0 0 0; white-space: pre-wrap;">{{ $order->notes }}</td>
                         </tr>
                         @endif
                     </table>
@@ -241,7 +248,7 @@
         </tbody>
     </table>
 
-    {{-- TOTALS (only bottom borders between rows) --}}
+    {{-- TOTALS --}}
     <div class="keep-together" style="margin-top:10px;">
         <table class="totals">
             <tr>
@@ -265,11 +272,6 @@
                 <td class="val">&nbsp;₺&nbsp;{{ $fmt($grandTotal) }}</td>
             </tr>
         </table>
-    </div>
-
-    <div class="footer" style="margin-top:12mm; color:#6b7280; font-size:10px; text-align:center;">
-        Herhangi bir sorunuz için bizimle iletişime geçin:
-        <strong>{{ $brand['email'] ?? '—' }}</strong> · {{ $brand['phone'] ?? '' }}
     </div>
 
     {{-- Page numbers (requires enable_php=true in config/dompdf.php) --}}

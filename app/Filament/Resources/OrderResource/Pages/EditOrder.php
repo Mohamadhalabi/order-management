@@ -12,8 +12,7 @@ class EditOrder extends EditRecord
 {
     protected static string $resource = OrderResource::class;
 
-    /** Snapshot when the page loads */
-    public array $originalItems = [];   // [['product_id'=>..,'qty'=>..], ...]
+    public array $originalItems = [];
     public ?int $originalBranchId = null;
 
     public function mount($record): void
@@ -35,7 +34,6 @@ class EditOrder extends EditRecord
         }
     }
 
-    /** Convert current DB items to simple arrays */
     protected function itemsArrayFromDb(): array
     {
         return $this->record->items()
@@ -44,29 +42,32 @@ class EditOrder extends EditRecord
             ->values()->all();
     }
 
+
+
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        // Raw state ALWAYS contains relationship repeater rows, even when not dehydrated.
+        // Get everything exactly as it is on the form (even non-dehydrated bits)
         $state = $this->form->getRawState();
 
-        $data['items'] = $state['items'] ?? [];  // ensure items are present for recompute
+        // ✅ Make sure the changed customer_id gets into the final payload
+        if (array_key_exists('customer_id', $state)) {
+            $data['customer_id'] = (int) $state['customer_id'];
+        }
+
+        // Keep items present so totals can be recomputed
+        $data['items'] = $state['items'] ?? [];
+
         return \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
     }
 
 
     protected function afterFill(): void
     {
-        $state  = $this->form->getRawState(); // includes items[]
-        $state  = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($state);
-        $this->form->fill($state);            // push computed subtotal/kdv/total into form
+        $state = $this->form->getRawState();
+        $state = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($state);
+        $this->form->fill($state);
     }
 
-    /**
-     * After Filament persists changes:
-     *  - If branch unchanged: apply delta = new - old on that branch
-     *  - If branch changed: return all old to original branch, take all new from new branch
-     *  - Update stock_snapshot for each line to remaining stock in active branch
-     */
     protected function afterSave(): void
     {
         $order = $this->record->fresh(['items']);
@@ -77,7 +78,6 @@ class EditOrder extends EditRecord
         $oldItems = $this->originalItems;
         $newItems = $this->itemsArrayFromDb();
 
-        // Apply branch-level stock logic
         $remaining = BranchStockService::applyForCreateOrEdit(
             oldBranchId: $oldBranchId,
             newBranchId: $newBranchId,
@@ -85,7 +85,6 @@ class EditOrder extends EditRecord
             newItems: $newItems
         );
 
-        // Update each item's stock_snapshot to remaining stock in the (new) branch
         DB::transaction(function () use ($order, $remaining) {
             foreach ($order->items as $item) {
                 $pid = (int) $item->product_id;
@@ -98,9 +97,7 @@ class EditOrder extends EditRecord
             }
         });
 
-        // Reset snapshots so subsequent edits compute fresh deltas
         $this->originalBranchId = (int) $order->branch_id;
         $this->originalItems    = $this->itemsArrayFromDb();
     }
-    
 }

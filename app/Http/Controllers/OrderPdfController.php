@@ -49,28 +49,19 @@ class OrderPdfController extends Controller
             ->stream("siparis-{$order->id}.pdf");
     }
 
-    /**
-     * Render Blade to HTML, then shape only Arabic segments so DomPDF
-     * displays joined glyphs. Keeps Western (English) digits.
-     */
+    /** Render Blade and shape Arabic segments so DomPDF joins glyphs. */
     private function renderAndShape(Order $order, array $brand): string
     {
-        // 1) Render Blade to a single HTML string
         $html = view('pdf.order', compact('order', 'brand'))->render();
 
-        // 2) Identify Arabic runs and replace them back-to-front
         $arabic = new Arabic();
-
-        // Find [start, end, start, end, ...] positions of Arabic substrings
         $p = $arabic->arIdentify($html);
 
-        // Replace from the end to preserve earlier offsets
         for ($i = count($p) - 1; $i >= 0; $i -= 2) {
             $start  = $p[$i - 1];
             $length = $p[$i] - $start;
 
             $segment = substr($html, $start, $length);
-            // utf8Glyphs(text, max_chars, $hindo=false to keep English digits, $forcertl=true helps in mixed LTR tables)
             $shaped  = $arabic->utf8Glyphs($segment, 50, false, true);
 
             $html = substr_replace($html, $shaped, $start, $length);

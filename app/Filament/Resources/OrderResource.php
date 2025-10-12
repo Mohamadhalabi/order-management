@@ -6,7 +6,6 @@ use App\Filament\Resources\OrderResource\Pages;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
-use App\Models\Branch;
 use App\Models\ProductBranchStock;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -61,36 +60,37 @@ class OrderResource extends Resource
                     ->schema([
                         Section::make('Sipariş')
                             ->schema([
-                                // 🔹 Required Branch
-                            Select::make('branch_id')
-                                ->label('Şube')
-                                ->required()
-                                ->options(fn () => \App\Models\Branch::query()->orderBy('name')->pluck('name', 'id')->toArray())
-                                ->searchable()
-                                ->preload()
-                                ->native(false)
-                                ->dehydrated(true)          // ⬅️ ensure it persists to the model
-                                ->default(function ($record) { // create page: pick first branch as default
-                                    if ($record) return null;  // on edit, use existing value
-                                    return \App\Models\Branch::orderBy('id')->value('id');
-                                })
-                                ->reactive()
-                                ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                    self::refreshAllItemStocksForBranch($set, $get, (int) $state);
-                                    self::recalcTotals($set, $get);
-                                })
-                                ->afterStateHydrated(function ($state, Set $set, Get $get) {
-                                    // when editing existing order, re-sync stock snapshots
-                                    if ($state) {
+                                // 🔹 Şube
+                                Select::make('branch_id')
+                                    ->label('Şube')
+                                    ->required()
+                                    ->options(fn () => \App\Models\Branch::query()->orderBy('name')->pluck('name', 'id')->toArray())
+                                    ->searchable()
+                                    ->preload()
+                                    ->native(false)
+                                    ->dehydrated(true)
+                                    ->default(function ($record) {
+                                        if ($record) return null;  // edit: use existing
+                                        return \App\Models\Branch::orderBy('id')->value('id');
+                                    })
+                                    ->reactive()
+                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                         self::refreshAllItemStocksForBranch($set, $get, (int) $state);
-                                    }
-                                }),
+                                        self::recalcTotals($set, $get);
+                                    })
+                                    ->afterStateHydrated(function ($state, Set $set, Get $get) {
+                                        if ($state) {
+                                            self::refreshAllItemStocksForBranch($set, $get, (int) $state);
+                                        }
+                                    }),
 
+                                // 🔹 Müşteri (now persists AND overwrites billing on change)
                                 Select::make('customer_id')
                                     ->label('Müşteri')
                                     ->required()
                                     ->searchable()
                                     ->native(false)
+                                    ->dehydrated(true)
                                     ->getSearchResultsUsing(function (string $search) {
                                         $like = "%{$search}%";
 
@@ -150,7 +150,8 @@ class OrderResource extends Resource
 
                                         return $u->getKey();
                                     })
-                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get))
+                                    // overwrite on change, fill-if-blank on hydrate:
+                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::overwriteBillingFromCustomer($set, $get))
                                     ->afterStateHydrated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get)),
 
                                 Select::make('status')
@@ -470,6 +471,7 @@ class OrderResource extends Resource
             ->value('stock') ?? 0);
     }
 
+    /** Prefill billing only when fields are blank (on hydrate). */
     protected static function fillBillingFromCustomer(Set $set, Get $get): void
     {
         $customerId = $get('customer_id');
@@ -500,6 +502,34 @@ class OrderResource extends Resource
         $fillIfBlank('billing_state',    $state);
         $fillIfBlank('billing_postcode', $u->billing_postcode ?? null);
         $fillIfBlank('billing_country',  $u->billing_country ?? 'TR');
+    }
+
+    /** Overwrite billing when user explicitly changes the customer. */
+    protected static function overwriteBillingFromCustomer(Set $set, Get $get): void
+    {
+        $customerId = $get('customer_id');
+        if (! $customerId) return;
+
+        $u = User::find($customerId);
+        if (! $u) return;
+
+        $state = $u->billing_state ?? null;
+        if ($state && ! str_starts_with((string) $state, 'TR')) {
+            $map = [];
+            foreach (self::turkishProvinces() as $code => $name) {
+                $map[mb_strtolower($name)] = $code;
+            }
+            $state = $map[mb_strtolower($state)] ?? $state;
+        }
+
+        $set('billing_name',          $u->name ?? null);
+        $set('billing_phone',         $u->phone ?? null);
+        $set('billing_address_line1', $u->billing_address_line1 ?? null);
+        $set('billing_address_line2', $u->billing_address_line2 ?? null);
+        $set('billing_city',          $u->billing_city ?? null);
+        $set('billing_state',         $state);
+        $set('billing_postcode',      $u->billing_postcode ?? null);
+        $set('billing_country',       $u->billing_country ?? 'TR');
     }
 
     protected static function recalcTotals(Set $set, Get $get): void
@@ -584,7 +614,7 @@ class OrderResource extends Resource
                         'info'    => 'kargolandi',
                         'danger'  => 'iptal',
                     ]),
-                Tables\Columns\TextColumn::make('branch.name')->label('Şube'), // show branch on table
+                Tables\Columns\TextColumn::make('branch.name')->label('Şube'),
                 Tables\Columns\TextColumn::make('kdv_percent')
                     ->label('KDV %')
                     ->state(fn (Order $r) => (float) ($r->kdv_percent ?? 0))
@@ -614,6 +644,63 @@ class OrderResource extends Resource
                     ->visible(fn ($record) => $record->status !== 'tamamlandi'),
             ])
             ->bulkActions([
+                Tables\Actions\BulkAction::make('set_status')
+                    ->label('Durumu Değiştir')
+                    ->icon('heroicon-o-adjustments-vertical')
+                    ->color('primary')
+                    ->requiresConfirmation()
+                    ->modalHeading('Seçilen siparişlerin durumunu değiştir')
+                    ->modalButton('Uygula')
+                    ->form([
+                        Select::make('status')
+                            ->label('Yeni durum')
+                            ->required()
+                            ->native(false)
+                            ->options([
+                                'taslak'     => 'Taslak',
+                                'onaylandi'  => 'Onaylandı',
+                                'odendi'     => 'Ödendi',
+                                'kargolandi' => 'Kargolandı',
+                                'tamamlandi' => 'Tamamlandı',
+                                'iptal'      => 'İptal',
+                            ]),
+                    ])
+                    ->action(function (array $data, \Illuminate\Database\Eloquent\Collection $records) {
+                        $updated = 0;
+                        $skipped = 0;
+
+                        foreach ($records as $order) {
+                            // Tamamlananları dokunma (tekil düzenlemede de engelleniyor)
+                            if (($order->status ?? null) === 'tamamlandi') {
+                                $skipped++;
+                                continue;
+                            }
+
+                            $order->status = $data['status'];
+
+                            if (!empty($data['note'])) {
+                                if (!empty($data['overwrite_note'])) {
+                                    $order->notes = $data['note'];
+                                } else {
+                                    $order->notes = trim(
+                                        ($order->notes ? $order->notes . PHP_EOL : '') . $data['note']
+                                    );
+                                }
+                            }
+
+                            $order->saveQuietly();
+                            $updated++;
+                        }
+
+                        \Filament\Notifications\Notification::make()
+                            ->title('Toplu durum güncellemesi')
+                            ->body("Güncellenen: {$updated}" . ($skipped ? " · Atlanan (tamamlandı): {$skipped}" : ''))
+                            ->success()
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion(),
+
+
                 Tables\Actions\DeleteBulkAction::make()
                     ->label('Seçilenleri Sil')
                     ->color('danger')
@@ -621,6 +708,7 @@ class OrderResource extends Resource
                     ->modalHeading('Seçilen Siparişleri Sil')
                     ->modalDescription('Bu işlem geri alınamaz. Seçilen siparişleri silmek istediğinizden emin misiniz?'),
             ])
+
             ->defaultSort('id', 'desc');
     }
 
