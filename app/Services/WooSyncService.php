@@ -23,31 +23,15 @@ class WooSyncService
     {
         $count = 0;
 
-        // 1. Fetch exchange rate from your custom API
-        $tryRate = 1; // fallback
-        try {
-            $response = @file_get_contents('https://www.aanahtar.com.tr/wp-json/custom/v1/exchange-rates');
-            if ($response !== false) {
-                $rates = json_decode($response, true);
-                if (!empty($rates['TRY']['rate'])) {
-                    $tryRate = (float) $rates['TRY']['rate'];
-                }
-            }
-        } catch (\Exception $e) {
-            \Log::error('WooSync exchange rate fetch failed: ' . $e->getMessage());
-        }
-
-        \DB::transaction(function () use (&$count, $tryRate) {
+        \DB::transaction(function () use (&$count) {
             foreach ($this->client->pagedGet('/products') as $p) {
-                $wcId = (int) ($p['id'] ?? 0);
+                $wcId   = (int) ($p['id'] ?? 0);
                 $rawSku = trim((string) ($p['sku'] ?? ''));
-                $sku = $rawSku !== '' 
-                    ? str_replace('-', '', $rawSku) 
-                    : "WC-{$wcId}";
+                $sku    = $rawSku !== '' ? str_replace('-', '', $rawSku) : "WC-{$wcId}";
 
                 // Load product by wc_id OR SKU
                 $product = \App\Models\Product::where('wc_id', $wcId)->first();
-                if (!$product) {
+                if (! $product) {
                     $product = \App\Models\Product::firstOrNew(['sku' => $sku]);
                 }
 
@@ -58,20 +42,22 @@ class WooSyncService
                 $product->wc_id = $wcId;
                 $product->name  = (string) ($p['name'] ?? $product->name ?? '');
 
-                // Prices from WooCommerce (USD) → Convert to TRY
-                $regUSD  = (float) ($p['regular_price'] ?? 0);
-                $saleUSD = (float) ($p['sale_price'] ?? 0);
+                // 🔹 Use WooCommerce prices directly (no currency conversion)
+                // Woo returns prices as strings; cast safely to float
+                $regUSD   = (float) ($p['regular_price'] ?? 0);
+                $saleUSD  = (float) ($p['sale_price'] ?? 0);
                 $priceUSD = (float) ($p['price'] ?? $regUSD);
 
-                $reg  = $regUSD * $tryRate;
-                $sale = $saleUSD * $tryRate;
-                $price = $priceUSD * $tryRate;
+                $reg   = $regUSD;
+                $sale  = $saleUSD;
+                $price = $priceUSD;
 
-                // Apply pricing logic
+                // Pricing logic
                 if ($sale > 0) {
                     $product->sale_price = $sale;
                     $product->price = $price > 0 ? $price : $reg;
                 } else {
+                    $product->sale_price = null; // ensure cleared if previously set
                     if ($product->price <= 0 && $reg > 0) {
                         $product->price = $reg;
                     } else {
@@ -94,6 +80,7 @@ class WooSyncService
 
         return $count;
     }
+
 
 
 
