@@ -67,8 +67,8 @@ class ProductResource extends Resource
             Section::make('Temel Bilgiler')->schema([
                 TextInput::make('sku')->label('SKU')->required()->unique(ignoreRecord: true),
                 TextInput::make('name')->label('Ad')->required(),
-                TextInput::make('price')->label('Fiyat (TRY)')->numeric()->required()->default(0),
-                TextInput::make('sale_price')->label('İndirimli Fiyat (TRY)')->numeric()->nullable()
+                TextInput::make('price')->label('Fiyat (USD)')->numeric()->required()->default(0),
+                TextInput::make('sale_price')->label('İndirimli Fiyat (USD)')->numeric()->nullable()
                     ->helperText('Boş bırakın veya 0 girin (indirim yok).'),
                 TextInput::make('image')->label('Görsel URL')->nullable(),
             ])->columns(2),
@@ -104,8 +104,8 @@ class ProductResource extends Resource
                 Tables\Columns\TextColumn::make('sku')->label('SKU')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('name')->label('Ad')->searchable()->limit(60),
                 Tables\Columns\ImageColumn::make('image')->label('Görsel')->size(48)->square(),
-                Tables\Columns\TextColumn::make('price')->label('Fiyat')->money('try', true)->sortable(),
-                Tables\Columns\TextColumn::make('sale_price')->label('İndirimli')->money('try', true)->sortable()->color('danger'),
+                Tables\Columns\TextColumn::make('price')->label('Fiyat')->money('usd', true)->sortable(),
+                Tables\Columns\TextColumn::make('sale_price')->label('İndirimli')->money('usd', true)->sortable()->color('danger'),
             ], $branchColumns))
             ->actions([Tables\Actions\EditAction::make()->label('Düzenle')])
             ->bulkActions([Tables\Actions\DeleteBulkAction::make()->label('Toplu Sil')])

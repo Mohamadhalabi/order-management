@@ -52,7 +52,10 @@ class OrderPdfController extends Controller
     /** Render Blade and shape Arabic segments so DomPDF joins glyphs. */
     private function renderAndShape(Order $order, array $brand): string
     {
-        $html = view('pdf.order', compact('order', 'brand'))->render();
+        $code = $order->currency_code ?: 'USD';
+        $sym  = \App\Models\Currency::symbolFor($code) ?: $code;
+
+        $html = view('pdf.order', compact('order','brand','code','sym'))->render();
 
         $arabic = new Arabic();
         $p = $arabic->arIdentify($html);

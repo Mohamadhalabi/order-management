@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\ProductBranchStock;
+use App\Models\Currency;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Get;
@@ -19,6 +20,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\View as ViewComponent;
 use Filament\Forms\Components\Grid;
+use Filament\Forms\Components\Hidden;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -60,7 +62,7 @@ class OrderResource extends Resource
                     ->schema([
                         Section::make('Sipariş')
                             ->schema([
-                                // 🔹 Şube
+                                // Şube
                                 Select::make('branch_id')
                                     ->label('Şube')
                                     ->required()
@@ -70,7 +72,7 @@ class OrderResource extends Resource
                                     ->native(false)
                                     ->dehydrated(true)
                                     ->default(function ($record) {
-                                        if ($record) return null;  // edit: use existing
+                                        if ($record) return null;
                                         return \App\Models\Branch::orderBy('id')->value('id');
                                     })
                                     ->reactive()
@@ -84,7 +86,41 @@ class OrderResource extends Resource
                                         }
                                     }),
 
-                                // 🔹 Müşteri (now persists AND overwrites billing on change)
+                                // Para Birimi (rate comes from Currency table; NOT editable here)
+                                Select::make('currency_code')
+                                    ->label('Para Birimi')
+                                    ->options(fn () => Currency::activeOptions())
+                                    // default ONLY on create (no record yet) -> TRY
+                                    ->default(fn ($record) => $record?->currency_code ?: 'TRY')
+                                    ->required()
+                                    ->native(false)
+                                    ->dehydrated(true)
+                                    ->reactive()
+                                    ->afterStateHydrated(function ($state, Set $set, $record) {
+                                        // On create with blank state -> force TRY + its rate
+                                        if (!$record && blank($state)) {
+                                            $set('currency_code', 'TRY');
+                                            $set('currency_rate', (float) (Currency::rateFor('TRY') ?? 1));
+                                            return;
+                                        }
+
+                                        // Otherwise, sync rate with whatever code is present
+                                        $code = $state ?: 'TRY';
+                                        $set('currency_rate', (float) (Currency::rateFor($code) ?? 1));
+                                    })
+                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                        $rate = (float) (Currency::rateFor($state ?: 'TRY') ?? 1);
+                                        $set('currency_rate', $rate);
+                                        self::repriceAllItemsFromProducts($set, $get, $rate);
+                                        self::recalcTotals($set, $get);
+                                    }),
+
+                                // Hidden field: stored on order; never edited directly
+                                Hidden::make('currency_rate')
+                                    ->dehydrated(true)
+                                    ->default(fn () => (float) (Currency::rateFor('TRY') ?? 1)),
+
+                                // Müşteri
                                 Select::make('customer_id')
                                     ->label('Müşteri')
                                     ->required()
@@ -93,7 +129,6 @@ class OrderResource extends Resource
                                     ->dehydrated(true)
                                     ->getSearchResultsUsing(function (string $search) {
                                         $like = "%{$search}%";
-
                                         return User::query()
                                             ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'seller'))
                                             ->where(fn ($q) => $q
@@ -150,7 +185,6 @@ class OrderResource extends Resource
 
                                         return $u->getKey();
                                     })
-                                    // overwrite on change, fill-if-blank on hydrate:
                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::overwriteBillingFromCustomer($set, $get))
                                     ->afterStateHydrated(fn ($state, Set $set, Get $get) => self::fillBillingFromCustomer($set, $get)),
 
@@ -170,7 +204,7 @@ class OrderResource extends Resource
 
                                 Textarea::make('notes')->label('Notlar')->rows(2),
                             ])
-                            ->columns(2),
+                            ->columns(3),
 
                         Section::make('Kalemler')
                             ->schema([
@@ -187,10 +221,8 @@ class OrderResource extends Resource
                                             ->extraAttributes(function (Get $get) {
                                                 $pid = $get('product_id');
                                                 if (! $pid) return [];
-
                                                 $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
                                                 $live = self::branchStock($pid, $branchId);
-
                                                 return $live <= 0
                                                     ? ['style' => 'border:1px solid #dc2626;border-radius:8px;padding:8px;']
                                                     : [];
@@ -215,10 +247,8 @@ class OrderResource extends Resource
                                                     ->helperText(function (Get $get) {
                                                         $pid = $get('product_id');
                                                         if (! $pid) return null;
-
                                                         $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
                                                         $live     = self::branchStock($pid, $branchId);
-
                                                         if ($live <= 0) {
                                                             return new HtmlString('<span style="color:#dc2626;font-weight:600;">Bu ürün bu şubede stokta yok</span>');
                                                         }
@@ -241,7 +271,7 @@ class OrderResource extends Resource
                                                     ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                                         if (! $state) return;
 
-                                                        // warn on duplicate (allowed)
+                                                        // duplicate hint (allowed)
                                                         $items = $get('../../items') ?: [];
                                                         $count = 0;
                                                         foreach ($items as $row) {
@@ -261,8 +291,11 @@ class OrderResource extends Resource
 
                                                         $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
 
-                                                        $unit  = (float) ($p->sale_price ?? $p->price ?? 0);
-                                                        $stock = (int)   self::branchStock($p->id, $branchId);
+                                                        // Price in order currency = product USD × selected rate
+                                                        $rate = (float) ($get('../../currency_rate') ?? $get('currency_rate') ?? 1);
+                                                        $unit = self::unitFromProductAndRate($p, $rate);
+
+                                                        $stock = (int) self::branchStock($p->id, $branchId);
                                                         $img   = $p->image ?: null;
 
                                                         $set('unit_price', $unit);
@@ -293,7 +326,6 @@ class OrderResource extends Resource
                                                     ->helperText(function (Get $get) {
                                                         $pid = $get('product_id');
                                                         if (! $pid) return null;
-
                                                         $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
                                                         $live     = self::branchStock($pid, $branchId);
                                                         $style    = $live > 0 ? 'color:#16a34a;font-weight:600;' : 'color:#dc2626;font-weight:600;';
@@ -342,14 +374,14 @@ class OrderResource extends Resource
                         Section::make('Toplamlar')
                             ->schema([
                                 TextInput::make('subtotal')
-                                    ->label('Ara Toplam (TRY)')
+                                    ->label(fn (Get $get) => 'Ara Toplam (' . (Currency::symbolFor($get('currency_code')) ?: ($get('currency_code') ?: '')) . ')')
                                     ->numeric()
                                     ->readOnly()
                                     ->default(0)
                                     ->dehydrated(true),
 
                                 TextInput::make('shipping_amount')
-                                    ->label('Kargo (TRY)')
+                                    ->label(fn (Get $get) => 'Kargo (' . (Currency::symbolFor($get('currency_code')) ?: ($get('currency_code') ?: '')) . ')')
                                     ->numeric()
                                     ->default(0)
                                     ->reactive()
@@ -367,29 +399,19 @@ class OrderResource extends Resource
                                     ->dehydrated(true)
                                     ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_percent', 0) : null)
                                     ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
-                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                        $sub = (float) (OrderResource::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
-                                        $pct = (float) OrderResource::toFloat($state ?? 0);
-                                        $amount = round($sub * $pct / 100, 2);
-                                        OrderResource::setRoot($set, 'discount_amount', $amount);
-                                        OrderResource::recalcTotals($set, $get);
-                                    }),
+                                    // no cross-sync; only totals:
+                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => OrderResource::recalcTotals($set, $get)),
 
                                 TextInput::make('discount_amount')
-                                    ->label('İndirim (TRY)')
+                                    ->label(fn (Get $get) => 'İndirim (' . (Currency::symbolFor($get('currency_code')) ?: ($get('currency_code') ?: '')) . ')')
                                     ->numeric()
                                     ->default(0)
                                     ->live(onBlur: true)
                                     ->dehydrated(true)
                                     ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_amount', 0) : null)
                                     ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
-                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                        $sub = (float) (OrderResource::toFloat($get('../../subtotal') ?? $get('subtotal') ?? 0));
-                                        $amt = (float) OrderResource::toFloat($state ?? 0);
-                                        $pct = $sub > 0 ? round(($amt / $sub) * 100, 2) : 0;
-                                        OrderResource::setRoot($set, 'discount_percent', $pct);
-                                        OrderResource::recalcTotals($set, $get);
-                                    }),
+                                    // no cross-sync; only totals:
+                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => OrderResource::recalcTotals($set, $get)),
 
                                 TextInput::make('kdv_percent')
                                     ->label('KDV %')
@@ -403,14 +425,14 @@ class OrderResource extends Resource
                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => OrderResource::recalcTotals($set, $get)),
 
                                 TextInput::make('kdv_amount')
-                                    ->label('KDV (TRY)')
+                                    ->label(fn (Get $get) => 'KDV (' . (Currency::symbolFor($get('currency_code')) ?: ($get('currency_code') ?: '')) . ')')
                                     ->numeric()
                                     ->readOnly()
                                     ->default(0)
                                     ->dehydrated(true),
 
                                 TextInput::make('total')
-                                    ->label('Toplam (TRY)')
+                                    ->label(fn (Get $get) => 'Toplam (' . (Currency::symbolFor($get('currency_code')) ?: ($get('currency_code') ?: '')) . ')')
                                     ->numeric()
                                     ->readOnly()
                                     ->default(0)
@@ -458,6 +480,27 @@ class OrderResource extends Resource
             if (! $pid) continue;
             $stock = self::branchStock($pid, $branchId);
             $set("items.{$i}.stock_snapshot", $stock);
+        }
+    }
+
+    /** Price helper: product USD × rate → rounded(2). */
+    protected static function unitFromProductAndRate(?Product $p, float $rate): float
+    {
+        if (! $p) return 0.0;
+        $usd = (float) ($p->sale_price ?? $p->price ?? 0);
+        return round($usd * max(0, $rate), 2);
+    }
+
+    /** Recompute all item unit prices from product.usd × rate (called on currency change). */
+    public static function repriceAllItemsFromProducts(Set $set, Get $get, float $rate): void
+    {
+        $items = $get('items') ?? [];
+        foreach ($items as $i => $row) {
+            $pid = (int) ($row['product_id'] ?? 0);
+            if (! $pid) continue;
+            $p = Product::find($pid);
+            $unit = self::unitFromProductAndRate($p, $rate);
+            $set("items.{$i}.unit_price", $unit);
         }
     }
 
@@ -552,6 +595,8 @@ class OrderResource extends Resource
         $discountAmount  = (float) ($get('../../discount_amount')  ?? $get('discount_amount')  ?? 0);
         $shippingAmount  = (float) ($get('../../shipping_amount')  ?? $get('shipping_amount')  ?? 0);
 
+        // Pick the larger of percent or amount (but DO NOT mutate the fields),
+        // then cap by subtotal:
         $percentDiscount = round($sub * $discountPercent / 100, 2);
         $finalDiscount   = min(max($discountAmount, $percentDiscount), $sub);
 
@@ -559,7 +604,6 @@ class OrderResource extends Resource
         $kdvAmount = round($taxBase * $kdvPercent / 100, 2);
 
         self::setRoot($set, 'subtotal', $sub);
-        self::setRoot($set, 'discount_amount', $finalDiscount);
         self::setRoot($set, 'kdv_amount', $kdvAmount);
         self::setRoot($set, 'total', round($taxBase + $shippingAmount + $kdvAmount, 2));
     }
@@ -592,7 +636,6 @@ class OrderResource extends Resource
                         if (empty($selected)) {
                             return $query->whereNotIn('status', ['kargolandi', 'tamamlandi']);
                         }
-
                         return $query->whereIn('status', $selected);
                     })
                     ->indicateUsing(function (array $data): array {
@@ -615,14 +658,29 @@ class OrderResource extends Resource
                         'danger'  => 'iptal',
                     ]),
                 Tables\Columns\TextColumn::make('branch.name')->label('Şube'),
+                Tables\Columns\TextColumn::make('currency_code')
+                    ->label('PB')
+                    ->state(fn (Order $r) => $r->currency_code ?? '')
+                    ->badge(),
                 Tables\Columns\TextColumn::make('kdv_percent')
                     ->label('KDV %')
                     ->state(fn (Order $r) => (float) ($r->kdv_percent ?? 0))
                     ->formatStateUsing(fn ($state) => rtrim(rtrim(number_format((float) $state, 2, ',', '.'), '0'), ','))
                     ->suffix(' %')
                     ->toggleable(),
-                Tables\Columns\TextColumn::make('discount_amount')->label('İndirim')->money('try', true)->toggleable(),
-                Tables\Columns\TextColumn::make('total')->label('Toplam')->money('try', true),
+                Tables\Columns\TextColumn::make('discount_amount')
+                    ->label('İndirim')
+                    ->state(function (Order $r) {
+                        $sym = Currency::symbolFor($r->currency_code) ?: $r->currency_code;
+                        return ($sym ? "{$sym} " : '') . number_format((float) $r->discount_amount, 2, '.', ',');
+                    })
+                    ->toggleable(),
+                Tables\Columns\TextColumn::make('total')
+                    ->label('Toplam')
+                    ->state(function (Order $r) {
+                        $sym = Currency::symbolFor($r->currency_code) ?: $r->currency_code;
+                        return ($sym ? "{$sym} " : '') . number_format((float) $r->total, 2, '.', ',');
+                    }),
                 Tables\Columns\TextColumn::make('creator.name')->label('Oluşturan')->toggleable(),
                 Tables\Columns\TextColumn::make('created_at')->label('Oluşturma')->since()->sortable(),
             ])
@@ -670,7 +728,6 @@ class OrderResource extends Resource
                         $skipped = 0;
 
                         foreach ($records as $order) {
-                            // Tamamlananları dokunma (tekil düzenlemede de engelleniyor)
                             if (($order->status ?? null) === 'tamamlandi') {
                                 $skipped++;
                                 continue;
@@ -699,7 +756,6 @@ class OrderResource extends Resource
                             ->send();
                     })
                     ->deselectRecordsAfterCompletion(),
-
 
                 Tables\Actions\DeleteBulkAction::make()
                     ->label('Seçilenleri Sil')

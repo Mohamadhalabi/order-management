@@ -1,6 +1,7 @@
 {{-- resources/views/pdf/order.blade.php --}}
 @php
     use Illuminate\Support\Str;
+    use App\Models\Currency; // ⬅️ for symbol lookup
 
     /** Money formatter: 1.234,56 */
     $fmt = fn($v) => number_format((float) $v, 2, ',', '.');
@@ -29,6 +30,10 @@
     // Hard-coded QR (smaller)
     $qr = file_exists(public_path('images/qr-code.png')) ? public_path('images/qr-code.png') : null;
 
+    // ---- Currency for this order ----
+    $code = $order->currency_code ?: 'USD';
+    $sym  = Currency::symbolFor($code) ?: $code;   // ⬅️ Symbol (falls back to code)
+
     // ---- Totals (mirror server logic) ----
     $calcSubtotal = function() use ($items) {
         return (float) $items->sum(function($r){
@@ -47,10 +52,10 @@
     $finalDiscount   = min(max($discountSaved, $discountFromPct), $subtotal);
 
     $kdvPercent      = (float)($order->kdv_percent ?? 0);
-    $taxBase         = max($subtotal - $finalDiscount, 0);           // Toplam after discount
+    $taxBase         = max($subtotal - $finalDiscount, 0);
     $kdvAmount       = isset($order->kdv_amount) ? (float)$order->kdv_amount : round($taxBase * $kdvPercent / 100, 2);
 
-    $grandTotal      = isset($order->total) ? (float)$order->total : ($taxBase + $kdvAmount + $shipping); // final
+    $grandTotal      = isset($order->total) ? (float)$order->total : ($taxBase + $kdvAmount + $shipping);
 @endphp
 
 <!doctype html>
@@ -88,21 +93,17 @@
         .qty { text-align: center; width: 48px; }
         .thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; display: block; }
 
-        /* Side-by-side blocks */
         .two-col { width: 100%; border: none; border-collapse: separate; table-layout: fixed; }
         .two-col td { border: none; vertical-align: top; padding: 0; }
         .two-col .col { width: 50%; }
         .two-col .left-pad  { padding-right: 6px; }
         .two-col .right-pad { padding-left: 6px; }
 
-        /* Items table can break across pages */
         table.items { page-break-inside: auto; }
         table.items tr { page-break-inside: avoid; page-break-after: auto; }
 
-        /* Totals must stay together */
         .keep-together { page-break-inside: avoid; }
 
-        /* === TOTALS: ONLY HORIZONTAL (bottom) BORDERS BETWEEN ROWS === */
         .totals { width: 360px; margin-left: auto; border-collapse: separate; border-spacing: 0; }
         .totals th, .totals td { padding: 8px 0; border: none !important; }
         .totals tr > td { border-bottom: 1px solid #e5e7eb !important; }
@@ -133,7 +134,6 @@
                 <div class="badge" style="margin-top:6px;">{{ strtoupper($order->status) }}</div>
             @endif
 
-            {{-- QR at top-right (hard-coded) --}}
             @if($qr)
                 <div>
                     <img class="qr" src="{{ $qr }}" alt="QR">
@@ -241,8 +241,8 @@
                     <td><div style="font-weight:600; margin-bottom:2px;">{{ $name }}</div></td>
                     <td class="sku">{{ $sku ?: '—' }}</td>
                     <td class="qty">{{ (int) $qty }}</td>
-                    <td class="right">&nbsp;₺&nbsp;{{ $fmt($price) }}</td>
-                    <td class="right">&nbsp;₺&nbsp;{{ $fmt($line) }}</td>
+                    <td class="right">&nbsp;{{ $sym }}&nbsp;{{ $fmt($price) }}</td>
+                    <td class="right">&nbsp;{{ $sym }}&nbsp;{{ $fmt($line) }}</td>
                 </tr>
             @endforeach
         </tbody>
@@ -253,15 +253,15 @@
         <table class="totals">
             <tr>
                 <td class="label">Ara Toplam</td>
-                <td class="val">&nbsp;₺&nbsp;{{ $fmt($subtotal) }}</td>
+                <td class="val">&nbsp;{{ $sym }}&nbsp;{{ $fmt($subtotal) }}</td>
             </tr>
             <tr>
-                <td class="label">İndirim (TRY)</td>
-                <td class="val">−&nbsp;₺&nbsp;{{ $fmt($finalDiscount) }}</td>
+                <td class="label">İndirim ({{ $code }})</td>
+                <td class="val">−&nbsp;{{ $sym }}&nbsp;{{ $fmt($finalDiscount) }}</td>
             </tr>
             <tr>
                 <td class="label">Toplam</td>
-                <td class="val">&nbsp;₺&nbsp;{{ $fmt($taxBase) }}</td>
+                <td class="val">&nbsp;{{ $sym }}&nbsp;{{ $fmt($taxBase) }}</td>
             </tr>
             <tr>
                 <td class="label">KDV %</td>
@@ -269,12 +269,11 @@
             </tr>
             <tr class="grand">
                 <td class="label">Toplam</td>
-                <td class="val">&nbsp;₺&nbsp;{{ $fmt($grandTotal) }}</td>
+                <td class="val">&nbsp;{{ $sym }}&nbsp;{{ $fmt($grandTotal) }}</td>
             </tr>
         </table>
     </div>
 
-    {{-- Page numbers (requires enable_php=true in config/dompdf.php) --}}
     <script type="text/php">
         if (isset($pdf)) {
             $font = $fontMetrics->getFont("DejaVu Sans", "normal");

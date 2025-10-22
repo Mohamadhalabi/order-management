@@ -16,7 +16,9 @@ class Order extends Model
         'billing_name','billing_phone','billing_address_line1','billing_address_line2',
         'billing_city','billing_state','billing_postcode','billing_country',
         'subtotal','shipping_amount','discount_percent','discount_amount',
-        'kdv_percent','kdv_amount','total','created_by_id',
+        'kdv_percent','kdv_amount','total','created_by_id',        'currency_code',
+        'currency_rate',
+
     ];
 
     protected $casts = [

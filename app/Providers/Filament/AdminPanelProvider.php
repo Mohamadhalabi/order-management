@@ -9,6 +9,9 @@ use Filament\Pages;
 use Filament\Support\Assets\Css;
 use Filament\Support\Colors\Color;
 
+// ⬇️ Add this import to explicitly register the resource
+use App\Filament\Resources\CurrencyResource;
+
 class AdminPanelProvider extends PanelProvider
 {
     public function panel(Panel $panel): Panel
@@ -37,12 +40,19 @@ class AdminPanelProvider extends PanelProvider
                 'gray'    => Color::Gray,
             ])
 
-            // Discover
+            // 🔎 Auto-discover resources/pages/widgets
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
 
-            ->pages([ Pages\Dashboard::class ])
+            // ✅ Also register CurrencyResource explicitly (belt & suspenders)
+            ->resources([
+                CurrencyResource::class,
+            ])
+
+            ->pages([
+                Pages\Dashboard::class,
+            ])
 
             ->middleware([
                 \Illuminate\Cookie\Middleware\EncryptCookies::class,
