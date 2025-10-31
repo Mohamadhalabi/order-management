@@ -26,38 +26,33 @@ class WooSyncService
         $count = 0;
 
         \DB::transaction(function () use (&$count) {
-            // If your WooClient supports query args, this already limits the feed.
+            // Request only status+visibility from Woo; filter types locally
             $query = [
-                'status'             => 'publish',         // only published
-                'catalog_visibility' => 'visible',         // not hidden/search
-                'type'               => ['simple','variable'], // no variations
+                'status'             => 'publish',
+                'catalog_visibility' => 'visible',
+                // 'type'            => ['simple','variable'], // ⟵ remove this
             ];
 
-            // Fall back safely if the client doesn't accept the 2nd arg.
             $iterator = null;
             try {
                 $iterator = $this->client->pagedGet('/products', $query);
             } catch (\Throwable $e) {
-                // Older clients may not support passing $query; ignore and filter inside the loop.
                 $iterator = $this->client->pagedGet('/products');
             }
 
             foreach ($iterator as $p) {
-                // Defensive filter in case the client ignored $query
                 $status      = strtolower((string)($p['status'] ?? ''));
                 $visibility  = strtolower((string)($p['catalog_visibility'] ?? ''));
                 $type        = strtolower((string)($p['type'] ?? ''));
 
-                // Only active, visible, non-variation products
                 if ($status !== 'publish') continue;
                 if ($visibility !== '' && $visibility !== 'visible') continue;
-                if ($type === 'variation') continue;
+                if ($type === 'variation') continue; // ⟵ keep excluding variations
 
                 $wcId   = (int) ($p['id'] ?? 0);
                 $rawSku = trim((string) ($p['sku'] ?? ''));
                 $sku    = $rawSku !== '' ? str_replace('-', '', $rawSku) : "WC-{$wcId}";
 
-                // Load product by wc_id OR SKU
                 $product = \App\Models\Product::where('wc_id', $wcId)->first();
                 if (! $product) {
                     $product = \App\Models\Product::firstOrNew(['sku' => $sku]);
@@ -70,7 +65,6 @@ class WooSyncService
                 $product->wc_id = $wcId;
                 $product->name  = (string) ($p['name'] ?? $product->name ?? '');
 
-                // 🔹 Use WooCommerce prices directly (no currency conversion)
                 $regUSD   = (float) ($p['regular_price'] ?? 0);
                 $saleUSD  = (float) ($p['sale_price'] ?? 0);
                 $priceUSD = (float) ($p['price'] ?? $regUSD);
@@ -79,20 +73,14 @@ class WooSyncService
                 $sale  = $saleUSD;
                 $price = $priceUSD;
 
-                // Pricing logic
                 if ($sale > 0) {
                     $product->sale_price = $sale;
-                    $product->price = $price > 0 ? $price : $reg;
+                    $product->price      = $price > 0 ? $price : $reg;
                 } else {
-                    $product->sale_price = null; // ensure cleared if previously set
-                    if (($product->price ?? 0) <= 0 && $reg > 0) {
-                        $product->price = $reg;
-                    } else {
-                        $product->price = $price;
-                    }
+                    $product->sale_price = null;
+                    $product->price      = ($product->price ?? 0) <= 0 && $reg > 0 ? $reg : $price;
                 }
 
-                // Product image
                 $images = $p['images'] ?? [];
                 if (!empty($images) && !empty($images[0]['src'])) {
                     $product->image = $images[0]['src'];
