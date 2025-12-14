@@ -21,17 +21,18 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\View as ViewComponent;
 use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Actions\Action;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Support\HtmlString;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Storage;
-use Filament\Forms\Components\Actions\Action;
 use Filament\Tables\Filters\Filter;
+use Filament\Tables\Filters\SelectFilter; // <--- Added this
 use Filament\Tables\Enums\FiltersLayout;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 class OrderResource extends Resource
 {
@@ -617,6 +618,14 @@ class OrderResource extends Resource
                 ->when($isSeller, fn ($q) => $q->where('created_by_id', auth()->id()))
             )
             ->filters([
+                // -------- NEW: SELLER FILTER (Only for Admin) --------
+                SelectFilter::make('created_by_id')
+                    ->label('Satış Temsilcisi')
+                    ->searchable()
+                    ->options(fn () => User::whereHas('roles', fn ($q) => $q->where('name', 'seller'))->pluck('name', 'id'))
+                    ->visible(! $isSeller), // Hide if user is a seller (they see only own orders anyway)
+                // -----------------------------------------------------
+
                 Filter::make('durumlar')
                     ->label('Durum')
                     ->form([
