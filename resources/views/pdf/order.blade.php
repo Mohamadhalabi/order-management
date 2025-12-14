@@ -62,9 +62,9 @@
 <html lang="tr">
 <head>
     <meta charset="utf-8">
-    <title>{{ $brand['name'] ?? 'Fatura' }}</title>
-    <style>
-        * { font-family: DejaVu Sans, sans-serif; }
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <title>{{ $brand['name'] ?? 'Fatura' }}</title>    <style>
+        * { font-family: 'DejaVu Sans', sans-serif; }
         body { font-size: 11px; color: #111; }
         h1,h2,h3,h4 { margin: 0; }
         .brand { color: {{ $brandColor }}; }
@@ -238,7 +238,12 @@
                             <img class="thumb" src="{{ $toPath($img) }}" alt="">
                         @endif
                     </td>
-                    <td><div style="font-weight:600; margin-bottom:2px;">{{ $name }}</div></td>
+                    {{-- Force the font family and use 'bold' instead of 600 --}}
+                    <td>
+                        <div style="font-family: 'DejaVu Sans', sans-serif;">
+                            {{ $name }}
+                        </div>
+                    </td>                    
                     <td class="sku">{{ $sku ?: '—' }}</td>
                     <td class="qty">{{ (int) $qty }}</td>
                     <td class="right">&nbsp;{{ $sym }}&nbsp;{{ $fmt($price) }}</td>
