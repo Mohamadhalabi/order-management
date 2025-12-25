@@ -15,11 +15,11 @@ class OrderPdfController extends Controller
         $order->load(['items.product', 'customer', 'creator']);
 
         // Unit price fallback
-        foreach ($order->items as $item) {
-            if ((float) $item->unit_price <= 0) {
-                $item->unit_price = (float) ($item->product?->sale_price ?: $item->product?->price ?: 0);
-            }
-        }
+        // foreach ($order->items as $item) {
+        //     if ((float) $item->unit_price <= 0) {
+        //         $item->unit_price = (float) ($item->product?->sale_price ?: $item->product?->price ?: 0);
+        //     }
+        // }
 
         $brand = $this->brandMeta();
         $code = $order->currency_code ?: 'USD';
