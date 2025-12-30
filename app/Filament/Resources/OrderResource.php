@@ -700,7 +700,8 @@ class OrderResource extends Resource
                     ->icon('heroicon-o-document-text')
                     ->button()
                     ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
-                    ->url(fn ($record) => route('orders.pdf', $record), shouldOpenInNewTab: true),
+                    // 👇 UPDATE THIS LINE
+                    ->url(fn ($record) => route('orders.pdf', ['order' => $record, 't' => time()]), shouldOpenInNewTab: true),
                 Tables\Actions\DeleteAction::make()
                     ->label('Sil')
                     ->icon('heroicon-o-trash')
