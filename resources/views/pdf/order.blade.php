@@ -12,40 +12,12 @@
         return rtrim(rtrim($s, '0'), ',');
     };
 
-    /** Build a Dompdf-friendly local path and convert to Base64 */
+    /** Build a Dompdf-friendly local/public path for images */
     $toPath = function (?string $path) {
         if (!$path) return null;
-        
-        // 1. If it's already base64, return it immediately
-        if (Str::startsWith($path, 'data:')) return $path;
-
-        // 2. Clean URL to get relative path (remove https://domain.com)
-        if (Str::startsWith($path, ['http://', 'https://'])) {
-            $path = parse_url($path, PHP_URL_PATH);
-        }
-        
-        // 3. Determine the absolute system path
-        $relative = ltrim($path, '/');
-        $realPath = public_path($relative);
-
-        // Fallback: If public_path fails, try looking directly in storage/app/public
-        // (This fixes issues where the symlink isn't followed correctly)
-        if (!file_exists($realPath) && Str::startsWith($relative, 'storage/')) {
-             $realPath = storage_path('app/public/' . substr($relative, 8));
-        }
-        
-        // 4. Read file and convert to Base64
-        if (file_exists($realPath)) {
-            try {
-                $type = pathinfo($realPath, PATHINFO_EXTENSION);
-                $data = file_get_contents($realPath);
-                return 'data:image/' . $type . ';base64,' . base64_encode($data);
-            } catch (\Exception $e) {
-                return null;
-            }
-        }
-        
-        return null;
+        if (Str::startsWith($path, ['data:', 'http://', 'https://', '/', 'file://'])) return $path;
+        $relative = Str::startsWith($path, 'storage/') ? $path : ('storage/' . ltrim($path, '/'));
+        return public_path($relative);
     };
 
     // Relationships / data
