@@ -15,9 +15,29 @@
     /** Build a Dompdf-friendly local/public path for images */
     $toPath = function (?string $path) {
         if (!$path) return null;
-        if (Str::startsWith($path, ['data:', 'http://', 'https://', '/', 'file://'])) return $path;
-        $relative = Str::startsWith($path, 'storage/') ? $path : ('storage/' . ltrim($path, '/'));
-        return public_path($relative);
+
+        // 1. Always pass Data URIs (base64) straight through
+        if (Str::startsWith($path, 'data:')) return $path;
+
+        // 2. If it's a full URL, parse it to get the local relative path
+        // This converts "https://site.com/storage/img.jpg" -> "storage/img.jpg"
+        if (Str::startsWith($path, ['http://', 'https://'])) {
+            $path = parse_url($path, PHP_URL_PATH);
+        }
+
+        // Clean leading slashes so public_path() works correctly
+        $path = ltrim($path, '/');
+
+        // 3. Check if the file exists exactly where pointed (e.g. public/images/logo.png)
+        // This handles cases where you used public_path() in the controller
+        if (file_exists($path)) return $path;
+        if (file_exists(public_path($path))) return public_path($path);
+
+        // 4. Fallback: Apply your specific storage logic
+        // If it doesn't start with 'storage/', prepend it.
+        $storageRel = Str::startsWith($path, 'storage/') ? $path : ('storage/' . $path);
+        
+        return public_path($storageRel);
     };
 
     // Relationships / data
