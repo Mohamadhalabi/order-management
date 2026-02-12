@@ -12,32 +12,40 @@
         return rtrim(rtrim($s, '0'), ',');
     };
 
-    /** Build a Dompdf-friendly local/public path for images */
+    /** Build a Dompdf-friendly local path and convert to Base64 */
     $toPath = function (?string $path) {
         if (!$path) return null;
-
-        // 1. Always pass Data URIs (base64) straight through
+        
+        // 1. If it's already base64, return it immediately
         if (Str::startsWith($path, 'data:')) return $path;
 
-        // 2. If it's a full URL, parse it to get the local relative path
-        // This converts "https://site.com/storage/img.jpg" -> "storage/img.jpg"
+        // 2. Clean URL to get relative path (remove https://domain.com)
         if (Str::startsWith($path, ['http://', 'https://'])) {
             $path = parse_url($path, PHP_URL_PATH);
         }
-
-        // Clean leading slashes so public_path() works correctly
-        $path = ltrim($path, '/');
-
-        // 3. Check if the file exists exactly where pointed (e.g. public/images/logo.png)
-        // This handles cases where you used public_path() in the controller
-        if (file_exists($path)) return $path;
-        if (file_exists(public_path($path))) return public_path($path);
-
-        // 4. Fallback: Apply your specific storage logic
-        // If it doesn't start with 'storage/', prepend it.
-        $storageRel = Str::startsWith($path, 'storage/') ? $path : ('storage/' . $path);
         
-        return public_path($storageRel);
+        // 3. Determine the absolute system path
+        $relative = ltrim($path, '/');
+        $realPath = public_path($relative);
+
+        // Fallback: If public_path fails, try looking directly in storage/app/public
+        // (This fixes issues where the symlink isn't followed correctly)
+        if (!file_exists($realPath) && Str::startsWith($relative, 'storage/')) {
+             $realPath = storage_path('app/public/' . substr($relative, 8));
+        }
+        
+        // 4. Read file and convert to Base64
+        if (file_exists($realPath)) {
+            try {
+                $type = pathinfo($realPath, PATHINFO_EXTENSION);
+                $data = file_get_contents($realPath);
+                return 'data:image/' . $type . ';base64,' . base64_encode($data);
+            } catch (\Exception $e) {
+                return null;
+            }
+        }
+        
+        return null;
     };
 
     // Relationships / data
