@@ -8,6 +8,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class WooSyncService
 {
@@ -18,41 +19,44 @@ class WooSyncService
 
     public function __construct(private WooClient $client) {}
 
-    /** Sync products: DOES NOT TOUCH stock
-     *  Only syncs active (status=publish, catalog_visibility=visible) simple/variable products.
+    /** * Sync products: REQUESTS USD DIRECTLY FROM API
      */
     public function syncProducts(): int
     {
         $count = 0;
 
-        \DB::transaction(function () use (&$count) {
-            // Request only status+visibility from Woo; filter types locally
-            $query = [
-                'status'             => 'publish',
-                'catalog_visibility' => 'visible',
-                // 'type'            => ['simple','variable'], // ⟵ remove this
-            ];
+        // Note: Removed the large wrapping transaction to prevent "Killed" memory errors on your Mac Mini
+        
+        // Request only status+visibility from Woo; Force USD currency
+        $query = [
+            'status'             => 'publish',
+            'catalog_visibility' => 'visible',
+            'currency'           => 'USD', // <--- This forces WooCommerce to return the $95.00 price
+        ];
 
-            $iterator = null;
-            try {
-                $iterator = $this->client->pagedGet('/products', $query);
-            } catch (\Throwable $e) {
-                $iterator = $this->client->pagedGet('/products');
-            }
+        $iterator = null;
+        try {
+            $iterator = $this->client->pagedGet('/products', $query);
+        } catch (\Throwable $e) {
+            Log::error("WooSync Error: " . $e->getMessage());
+            $iterator = $this->client->pagedGet('/products', ['currency' => 'USD']);
+        }
 
-            foreach ($iterator as $p) {
-                $status      = strtolower((string)($p['status'] ?? ''));
-                $visibility  = strtolower((string)($p['catalog_visibility'] ?? ''));
-                $type        = strtolower((string)($p['type'] ?? ''));
+        foreach ($iterator as $p) {
+            $status      = strtolower((string)($p['status'] ?? ''));
+            $visibility  = strtolower((string)($p['catalog_visibility'] ?? ''));
+            $type        = strtolower((string)($p['type'] ?? ''));
 
-                if ($status !== 'publish') continue;
-                if ($visibility !== '' && $visibility !== 'visible') continue;
-                if ($type === 'variation') continue; // ⟵ keep excluding variations
+            if ($status !== 'publish') continue;
+            if ($visibility !== '' && $visibility !== 'visible') continue;
+            if ($type === 'variation') continue;
 
-                $wcId   = (int) ($p['id'] ?? 0);
-                $rawSku = trim((string) ($p['sku'] ?? ''));
-                $sku    = $rawSku !== '' ? str_replace('-', '', $rawSku) : "WC-{$wcId}";
+            $wcId   = (int) ($p['id'] ?? 0);
+            $rawSku = trim((string) ($p['sku'] ?? ''));
+            $sku    = $rawSku !== '' ? str_replace('-', '', $rawSku) : "WC-{$wcId}";
 
+            // Process each product update in its own small transaction to save memory
+            \DB::transaction(function () use ($p, $wcId, $sku, &$count) {
                 $product = \App\Models\Product::where('wc_id', $wcId)->first();
                 if (! $product) {
                     $product = \App\Models\Product::firstOrNew(['sku' => $sku]);
@@ -65,20 +69,17 @@ class WooSyncService
                 $product->wc_id = $wcId;
                 $product->name  = (string) ($p['name'] ?? $product->name ?? '');
 
-                $regUSD   = (float) ($p['regular_price'] ?? 0);
-                $saleUSD  = (float) ($p['sale_price'] ?? 0);
-                $priceUSD = (float) ($p['price'] ?? $regUSD);
-
-                $reg   = $regUSD;
-                $sale  = $saleUSD;
-                $price = $priceUSD;
+                // Pull raw USD prices from the API (No division needed now)
+                $reg   = (float) ($p['regular_price'] ?? 0);
+                $sale  = (float) ($p['sale_price'] ?? 0);
+                $price = (float) ($p['price'] ?? $reg);
 
                 if ($sale > 0) {
                     $product->sale_price = $sale;
                     $product->price      = $price > 0 ? $price : $reg;
                 } else {
                     $product->sale_price = null;
-                    $product->price      = ($product->price ?? 0) <= 0 && $reg > 0 ? $reg : $price;
+                    $product->price      = $price;
                 }
 
                 $images = $p['images'] ?? [];
@@ -88,10 +89,10 @@ class WooSyncService
 
                 $product->wc_synced_at = now();
                 $product->save();
-
+                
                 $count++;
-            }
-        });
+            });
+        }
 
         return $count;
     }
@@ -100,18 +101,15 @@ class WooSyncService
     public function syncUsers(): int
     {
         $count = 0;
-
         $placeholderHash = \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(40));
 
-        \DB::transaction(function () use (&$count, $placeholderHash) {
-            foreach ($this->client->pagedGet('/customers') as $c) {
-                $wcId  = (int) ($c['id'] ?? 0);
-                $email = strtolower((string) ($c['email'] ?? ''));
+        foreach ($this->client->pagedGet('/customers') as $c) {
+            $wcId  = (int) ($c['id'] ?? 0);
+            $email = strtolower((string) ($c['email'] ?? ''));
 
-                if ($email === '') {
-                    continue;
-                }
+            if ($email === '') continue;
 
+            \DB::transaction(function () use ($c, $wcId, $email, $placeholderHash, &$count) {
                 $user = \App\Models\User::firstOrNew(['email' => $email]);
 
                 $user->wc_id       = $wcId;
@@ -119,14 +117,10 @@ class WooSyncService
                 $user->last_name   = $c['last_name']  ?? $user->last_name;
                 $user->name        = trim(($c['first_name'] ?? '').' '.($c['last_name'] ?? '')) ?: ($user->name ?? $email);
 
-                // Billing info from Woo
                 $billing = $c['billing'] ?? [];
                 $user->phone                    = $billing['phone']     ?? $user->phone;
                 $user->billing_address_line1    = $billing['address_1'] ?? $user->billing_address_line1;
-                $user->billing_address_line2    = $billing['address_2'] ?? $user->billing_address_line2;
                 $user->billing_city             = $billing['city']      ?? $user->billing_city;
-                $user->billing_state            = $billing['state']     ?? $user->billing_state;
-                $user->billing_postcode         = $billing['postcode']  ?? $user->billing_postcode;
                 $user->billing_country          = $billing['country']   ?? $user->billing_country;
 
                 $user->wc_synced_at = now();
@@ -137,8 +131,8 @@ class WooSyncService
 
                 $user->save();
                 $count++;
-            }
-        });
+            });
+        }
 
         return $count;
     }
