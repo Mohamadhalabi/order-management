@@ -46,7 +46,7 @@ class OrderResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return auth()->user()?->hasAnyRole('admin', 'seller') ?? false;
+        return auth()->user()?->hasAnyRole(['admin', 'seller', 'depo']) ?? false;
     }
 
     public static function shouldRegisterNavigation(): bool
@@ -192,12 +192,14 @@ class OrderResource extends Resource
                                 Select::make('status')
                                     ->label('Durum')
                                     ->options([
-                                        'taslak'     => 'Taslak',
-                                        'onaylandi'  => 'Onaylandı',
-                                        'odendi'     => 'Ödendi',
-                                        'kargolandi' => 'Kargolandı',
-                                        'tamamlandi' => 'Tamamlandı',
-                                        'iptal'      => 'İptal',
+                                        'taslak'       => 'Taslak',
+                                        'onaylandi'    => 'Onaylandı',
+                                        'odendi'       => 'Ödendi',
+                                        'depo'         => 'Depo',
+                                        'hazirlaniyor' => 'Hazırlanıyor',
+                                        'kargolandi'   => 'Kargolandı',
+                                        'tamamlandi'   => 'Tamamlandı',
+                                        'iptal'        => 'İptal',
                                     ])
                                     ->default('taslak')
                                     ->required()
@@ -612,10 +614,11 @@ class OrderResource extends Resource
     public static function table(Table $table): Table
     {
         $isSeller = auth()->user()?->hasRole('seller') && ! auth()->user()?->hasRole('admin');
-
+        $isDepo   = auth()->user()?->hasRole('depo') && ! auth()->user()?->hasRole('admin');
         return $table
             ->query(fn () => Order::query()
                 ->when($isSeller, fn ($q) => $q->where('created_by_id', auth()->id()))
+                ->when($isDepo, fn ($q) => $q->whereIn('status', ['depo', 'hazirlaniyor', 'kargolandi']))
             )
             ->filters([
                 // -------- NEW: SELLER FILTER (Only for Admin) --------
@@ -663,6 +666,7 @@ class OrderResource extends Resource
                     ->colors([
                         'gray'    => 'taslak',
                         'success' => ['odendi', 'onaylandi', 'tamamlandi'],
+                        'warning' => ['depo', 'hazirlaniyor'],
                         'info'    => 'kargolandi',
                         'danger'  => 'iptal',
                     ]),
@@ -725,12 +729,14 @@ class OrderResource extends Resource
                             ->required()
                             ->native(false)
                             ->options([
-                                'taslak'     => 'Taslak',
-                                'onaylandi'  => 'Onaylandı',
-                                'odendi'     => 'Ödendi',
-                                'kargolandi' => 'Kargolandı',
-                                'tamamlandi' => 'Tamamlandı',
-                                'iptal'      => 'İptal',
+                                'taslak'       => 'Taslak',
+                                'onaylandi'    => 'Onaylandı',
+                                'odendi'       => 'Ödendi',
+                                'depo'         => 'Depo',
+                                'hazirlaniyor' => 'Hazırlanıyor',
+                                'kargolandi'   => 'Kargolandı',
+                                'tamamlandi'   => 'Tamamlandı',
+                                'iptal'        => 'İptal',
                             ]),
                     ])
                     ->action(function (array $data, \Illuminate\Database\Eloquent\Collection $records) {

@@ -10,8 +10,7 @@ class OrderPdfController extends Controller
 {
     public function show(Order $order)
     {
-        abort_unless(auth()->user()?->hasAnyRole(['admin','seller']), 403);
-
+        abort_unless(auth()->user()?->hasAnyRole(['admin', 'seller', 'depo']), 403);
         $order->load(['items.product', 'customer', 'creator']);
 
         $brand = $this->brandMeta();
@@ -40,8 +39,8 @@ class OrderPdfController extends Controller
 
     // Apply the same fix to the __invoke method if you use it
     public function __invoke(Order $order)
-    {
-        abort_unless(auth()->user()?->hasAnyRole(['admin','seller']), 403);
+    {        
+        abort_unless(auth()->user()?->hasAnyRole(['admin', 'seller', 'depo']), 403);
         
         $order->load(['items.product', 'customer', 'creator']);
         @set_time_limit(120);

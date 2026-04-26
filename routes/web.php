@@ -71,5 +71,23 @@ Route::middleware(['web', 'auth'])  // anyone logged-in (admin or seller)
     ->get('/orders/{order}/pdf', [OrderPdfController::class, 'show'])
     ->name('orders.pdf');
 
+    Route::get('/_fix-depo', function () {
+    // Force create/update the user directly via web
+    $user = \App\Models\User::firstOrCreate(
+        ['email' => 'depo@aanahtar.com'],
+        ['name' => 'Depo']
+    );
+    
+    // Explicitly overwrite the password
+    $user->password = \Illuminate\Support\Facades\Hash::make('password');
+    $user->save();
+
+    // Ensure the role exists and is assigned
+    $role = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'depo', 'guard_name' => 'web']);
+    $user->syncRoles([$role]);
+
+    return 'Depo user fixed! ID: ' . $user->id;
+});
+
 
 require __DIR__.'/auth.php';

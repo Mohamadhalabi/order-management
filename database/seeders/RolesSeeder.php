@@ -11,9 +11,10 @@ class RolesSeeder extends Seeder
 {
     public function run(): void
     {
-        // Ensure roles exist on the 'web' guard
+        // Ensure roles exist
         $adminRole  = Role::firstOrCreate(['name' => 'admin',  'guard_name' => 'web']);
         $sellerRole = Role::firstOrCreate(['name' => 'seller', 'guard_name' => 'web']);
+        $depoRole   = Role::firstOrCreate(['name' => 'depo',   'guard_name' => 'web']);
 
         // Create users
         $admin = User::firstOrCreate(
@@ -24,9 +25,14 @@ class RolesSeeder extends Seeder
             ['email' => 'seller@example.com'],
             ['name' => 'Seller', 'password' => Hash::make('password')]
         );
+        $depo = User::updateOrCreate(
+            ['email' => 'depo@aanahtar.com'],
+            ['name' => 'Depo', 'password' => Hash::make('password')]
+        );
 
         // Assign roles
         $admin->syncRoles([$adminRole]);
         $seller->syncRoles([$sellerRole]);
+        $depo->syncRoles([$depoRole]);
     }
 }

@@ -20,7 +20,8 @@ class User extends Authenticatable implements FilamentUser
     // ✅ Filament access gate
     public function canAccessPanel(Panel $panel): bool
     {
-        $ok = $this->hasAnyRole(['admin','seller']);
+        // Add 'depo' to this array 👇
+        $ok = $this->hasAnyRole(['admin', 'seller', 'depo']); 
         Log::info('canAccessPanel', ['user' => $this->id, 'ok' => $ok, 'roles' => $this->getRoleNames()]);
         return $ok;
     }
