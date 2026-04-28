@@ -40,14 +40,22 @@ class CreateOrder extends CreateRecord
             $this->halt();
         }
 
+        if (isset($payload['customer_id'])) {
+            $payload['customer_id'] = (int) $payload['customer_id'];
+        }
+
         $payload = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($payload);
         $payload['created_by_id'] = \Illuminate\Support\Facades\Auth::id();
+
+        // 👇 FIX: Remove items relationship array so Laravel doesn't crash on insert!
+        unset($payload['items']);
 
         return $payload;
     }
 
     /**
      * After create:
+     *  - Sync the tax number back to the user
      *  - Deduct branch stock for each line (by ordered qty)
      *  - Update each item's stock_snapshot to remaining stock in that branch
      *  - Generate PDF
@@ -55,6 +63,12 @@ class CreateOrder extends CreateRecord
     protected function afterCreate(): void
     {
         $order = $this->record->fresh(['items', 'customer', 'creator']);
+
+        // 👇 FIX: Sync the Vergi Numarası back to the User Profile
+        if ($order->customer_id && !empty($order->billing_tax_number)) {
+            \App\Models\User::where('id', $order->customer_id)
+                ->update(['tax_number' => $order->billing_tax_number]);
+        }
 
         // Convert items to simple arrays for the service
         $newItems = $order->items->map(fn ($i) => [
@@ -85,6 +99,12 @@ class CreateOrder extends CreateRecord
 
         // PDF
         $pdf = Pdf::loadView('pdf.order', ['order' => $order->fresh(['items.product', 'customer', 'creator'])]);
+        
+        // Ensure correct encoding for Turkish characters in PDF
+        $html = view('pdf.order', ['order' => $order->fresh(['items.product', 'customer', 'creator']), 'brand' => $this->brandMeta(), 'code' => $order->currency_code ?: 'USD', 'sym' => \App\Models\Currency::symbolFor($order->currency_code ?: 'USD') ?: ($order->currency_code ?: 'USD')])->render();
+        $html = mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8');
+        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'portrait');
+
         $path = "orders/{$order->id}.pdf";
         Storage::disk('public')->put($path, $pdf->output());
         $order->updateQuietly(['pdf_path' => $path]);
@@ -93,5 +113,17 @@ class CreateOrder extends CreateRecord
     protected function getRedirectUrl(): string
     {
         return $this->getResource()::getUrl('index');
+    }
+
+    private function brandMeta(): array
+    {
+        return [
+            'name'    => 'Anadolu Anahtar',
+            'logo'    => public_path('images/Logo-Normal.webp'),
+            'address' => 'Kuyuluk, Fındıkpınarı Cd. No:70, 33330 Mezitli/Mersin',
+            'phone'   => '(+90) 552 436 80 30',
+            'email'   => 'Satis@aanahtar.com.tr',
+            'color'   => '#2D83B0',
+        ];
     }
 }
