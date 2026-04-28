@@ -27,10 +27,25 @@ class EditOrder extends EditRecord
         $this->originalItems = $this->itemsArrayFromDb();
     }
 
+    // 👇 ADD THIS to hide the Save button for non-depo users
+    protected function getFormActions(): array
+    {
+        if (($this->record->status ?? null) === 'depo' && !auth()->user()?->hasRole('depo')) {
+            return [$this->getCancelFormAction()]; // Shows only the Cancel/Back button
+        }
+
+        return parent::getFormActions();
+    }
+
     protected function beforeSave(): void
     {
         if (($this->record->status ?? null) === 'tamamlandi') {
             abort(403, 'Tamamlanmış siparişler düzenlenemez.');
+        }
+
+        // 👇 ADD THIS for backend protection
+        if (($this->record->status ?? null) === 'depo' && !auth()->user()?->hasRole('depo')) {
+            abort(403, 'Depo durumundaki siparişleri sadece depo yetkilisi düzenleyebilir.');
         }
     }
 
@@ -42,24 +57,24 @@ class EditOrder extends EditRecord
             ->values()->all();
     }
 
-
-
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        // Get everything exactly as it is on the form (even non-dehydrated bits)
+        // Get everything exactly as it is on the form
         $state = $this->form->getRawState();
 
-        // ✅ Make sure the changed customer_id gets into the final payload
         if (array_key_exists('customer_id', $state)) {
             $data['customer_id'] = (int) $state['customer_id'];
         }
 
-        // Keep items present so totals can be recomputed
+        // Keep items temporarily so totals can be recomputed
         $data['items'] = $state['items'] ?? [];
+        $data = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
 
-        return \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
+        // 👇 ADD THIS LINE: Remove the items array before saving so Laravel doesn't crash!
+        unset($data['items']);
+
+        return $data;
     }
-
 
     protected function afterFill(): void
     {
@@ -71,6 +86,11 @@ class EditOrder extends EditRecord
     protected function afterSave(): void
     {
         $order = $this->record->fresh(['items']);
+
+        if ($order->customer_id && !empty($order->billing_tax_number)) {
+            \App\Models\User::where('id', $order->customer_id)
+                ->update(['tax_number' => $order->billing_tax_number]);
+        }
 
         $newBranchId = (int) $order->branch_id;
         $oldBranchId = (int) $this->originalBranchId;

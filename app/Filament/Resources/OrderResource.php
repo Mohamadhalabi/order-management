@@ -57,6 +57,11 @@ class OrderResource extends Resource
     public static function form(Form $form): Form
     {
         return $form
+            // 👇 Disables the entire form if status is 'depo' AND user is not 'depo'
+            ->disabled(function (?Order $record) {
+                if (! $record) return false;
+                return $record->status === 'depo' && !auth()->user()?->hasRole('depo');
+            })
             ->schema([
                 // LEFT
                 Group::make()
@@ -153,6 +158,9 @@ class OrderResource extends Resource
                                             ->rules(['nullable', 'email', 'max:191', \Illuminate\Validation\Rule::unique('users', 'email')]),
                                         TextInput::make('phone')->label('Telefon')->tel()
                                             ->rules(['nullable', 'string', 'max:20']),
+
+                                        TextInput::make('tax_number')->label('Vergi Numarası')->maxLength(100),
+
                                         Forms\Components\Fieldset::make('Fatura Adresi')->schema([
                                             TextInput::make('billing_address_line1')->label('Adres Satırı'),
                                             TextInput::make('billing_city')->label('Şehir / İlçe'),
@@ -171,6 +179,8 @@ class OrderResource extends Resource
                                         $u->email = $data['email'] ?? null;
                                         $u->phone = $data['phone'] ?? null;
 
+                                        $u->tax_number = $data['tax_number'] ?? null;
+                                        
                                         $u->billing_address_line1 = $data['billing_address_line1'] ?? null;
                                         $u->billing_city          = $data['billing_city'] ?? null;
                                         $u->billing_state         = $data['billing_state'] ?? null;
@@ -449,6 +459,12 @@ class OrderResource extends Resource
                                     TextInput::make('billing_name')->hidden()->dehydrated(),
                                     TextInput::make('billing_phone')->label('Telefon')->tel()
                                         ->rules(['string', 'max:20'])->columnSpan(6),
+
+                                    TextInput::make('billing_tax_number')
+                                        ->label('Vergi Numarası')
+                                        ->maxLength(50)
+                                        ->columnSpan(12),
+
                                     Textarea::make('billing_address_line1')->label('Adres Satırı')->rows(2)->columnSpan(12),
                                     TextInput::make('billing_city')->label('Şehir / İlçe')->columnSpan(12),
                                     Select::make('billing_state')->label('İl (Eyalet)')
@@ -533,6 +549,10 @@ class OrderResource extends Resource
         };
 
         $fillIfBlank('billing_phone',         $u->phone ?? null);
+        
+        // 👇 THIS LINE FIXES THE ISSUE ON PAGE LOAD
+        $fillIfBlank('billing_tax_number',    $u->tax_number ?? null); 
+        
         $fillIfBlank('billing_address_line1', $u->billing_address_line1 ?? null);
         $fillIfBlank('billing_address_line2', $u->billing_address_line2 ?? null);
         $fillIfBlank('billing_city',          $u->billing_city ?? null);
@@ -570,6 +590,10 @@ class OrderResource extends Resource
 
         $set('billing_name',          $u->name ?? null);
         $set('billing_phone',         $u->phone ?? null);
+        
+        // 👇 THIS LINE FIXES THE ISSUE WHEN SELECTING/CREATING A CUSTOMER
+        $set('billing_tax_number',    $u->tax_number ?? null); 
+        
         $set('billing_address_line1', $u->billing_address_line1 ?? null);
         $set('billing_address_line2', $u->billing_address_line2 ?? null);
         $set('billing_city',          $u->billing_city ?? null);
@@ -633,7 +657,8 @@ class OrderResource extends Resource
                     ->label('Durum')
                     ->form([
                         Forms\Components\Toggle::make('show_kargolandi')->label('Kargolandı')->inline(false),
-                        Forms\Components\Toggle::make('show_tamamlandi')->label('Tamamlandı')->inline(false),
+                        Forms\Components\Toggle::make('show_tamamlandi')->label('Tamamlandı')->inline(false)
+                        ->hidden(fn () => auth()->user()?->hasRole('depo')),
                     ])
                     ->columns(2)
                     ->default([
@@ -894,5 +919,26 @@ class OrderResource extends Resource
     protected static function dec(mixed $v): string
     {
         return number_format((float) $v, 2, '.', '');
+    }
+
+
+    public static function getEloquentQuery(): Builder
+    {
+        $query = parent::getEloquentQuery();
+        $user = auth()->user();
+
+        if ($user?->hasRole('admin')) {
+            return $query;
+        }
+
+        if ($user?->hasRole('depo')) {
+            $query->whereIn('status', ['depo', 'hazirlaniyor', 'kargolandi']);
+        }
+
+        if ($user?->hasRole('seller')) {
+            $query->where('created_by_id', $user->id);
+        }
+
+        return $query;
     }
 }

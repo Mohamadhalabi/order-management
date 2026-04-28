@@ -9,24 +9,17 @@ class Order extends Model
 {
     use HasFactory;
 
+    // This single line allows all columns to be saved
     protected $guarded = [];
 
-    protected $fillable = [
-        'customer_id','branch_id','status','notes',
-        'billing_name','billing_phone','billing_address_line1','billing_address_line2',
-        'billing_city','billing_state','billing_postcode','billing_country',
-        'subtotal','shipping_amount','discount_percent','discount_amount',
-        'kdv_percent','kdv_amount','total','created_by_id',        'currency_code',
-        'currency_rate',
-
-    ];
+    // I HAVE DELETED THE $fillable ARRAY HERE
 
     protected $casts = [
         'subtotal'         => 'decimal:2',
         'shipping_amount'  => 'decimal:2',
         'kdv_percent'      => 'decimal:2',
         'kdv_amount'       => 'decimal:2',
-        'discount_amount'   => 'decimal:2',
+        'discount_amount'  => 'decimal:2',
         'discount_percent' => 'decimal:2',
         'total'            => 'decimal:2',
         'created_at'       => 'datetime',
@@ -66,6 +59,7 @@ class Order extends Model
 
         return \Storage::url($this->pdf_path);
     }
+    
     public function branch()
     {
         return $this->belongsTo(\App\Models\Branch::class);

@@ -24,9 +24,13 @@ class ShopStatsOverview extends BaseWidget
         $user = auth()->user();
         $orders = Order::query();
 
-        // Sellers see only their own orders
-        if ($user?->hasRole('seller') && ! $user->hasRole('admin')) {
-            $orders->where('created_by_id', $user->id);
+        // Admin sees everything. Restrict others:
+        if (! $user?->hasRole('admin')) {
+            if ($user?->hasRole('depo')) {
+                $orders->whereIn('status', ['depo', 'hazirlaniyor', 'kargolandi']);
+            } elseif ($user?->hasRole('seller')) {
+                $orders->where('created_by_id', $user->id);
+            }
         }
 
         $startOfMonth     = Carbon::now()->startOfMonth();

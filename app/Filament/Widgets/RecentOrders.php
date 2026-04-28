@@ -13,35 +13,47 @@ class RecentOrders extends BaseWidget
 {
     protected static ?string $heading = 'Son Siparişler';
 
+    public static function canView(): bool
+    {
+        // Sadece admin ve seller görebilir, depo göremez.
+        return auth()->user()?->hasAnyRole(['admin', 'seller']) ?? false;
+    }
+
     public function getColumnSpan(): int|string|array
     {
-        // Full width inside the content area
         return 'full';
+    }
+
+    // Shared query logic for the widget
+    protected function getFilteredQuery(): Builder
+    {
+        $query = Order::query()->latest();
+        $user = auth()->user();
+
+        if ($user?->hasRole('admin')) {
+            return $query;
+        }
+
+        if ($user?->hasRole('depo')) {
+            return $query->whereIn('status', ['depo', 'hazirlaniyor', 'kargolandi']);
+        }
+
+        if ($user?->hasRole('seller')) {
+            return $query->where('created_by_id', $user->id);
+        }
+
+        return $query;
     }
 
     protected function baseQuery(): Builder
     {
-        return Order::query()
-            ->latest()
-            ->when(
-                auth()->user()?->hasRole('seller') && ! auth()->user()?->hasRole('admin'),
-                fn (Builder $q) => $q->where('created_by_id', auth()->id())
-            );
+        return $this->getFilteredQuery();
     }
 
     public function table(Table $table): Table
     {
-        $base = fn (): Builder => Order::query()
-            ->latest()
-            ->when(
-                auth()->user()?->hasRole('seller') && ! auth()->user()?->hasRole('admin'),
-                fn (Builder $q) => $q->where('created_by_id', auth()->id())
-            );
-
         return $table
-            ->query($base())
-
-            // “Tabs” via pill filters
+            ->query($this->getFilteredQuery())
             ->filters([
                 Tables\Filters\Filter::make('tamamlandi')
                     ->label('Tamamlandı')
@@ -56,39 +68,23 @@ class RecentOrders extends BaseWidget
                     ),
             ])
             ->filtersLayout(FiltersLayout::AboveContent)
-
             ->defaultPaginationPageOption(10)
             ->columns([
-                Tables\Columns\TextColumn::make('id')
-                    ->label('#')
-                    ->sortable(),
-
-                Tables\Columns\TextColumn::make('customer.name')
-                    ->label('Müşteri')
-                    ->searchable(),
-
+                Tables\Columns\TextColumn::make('id')->label('#')->sortable(),
+                Tables\Columns\TextColumn::make('customer.name')->label('Müşteri')->searchable(),
                 Tables\Columns\TextColumn::make('status')
                     ->label('Durum')
                     ->badge()
                     ->colors([
                         'gray'    => 'taslak',
-                        'success' => ['odendi', 'onaylandi'],
+                        'success' => ['odendi', 'onaylandi', 'tamamlandi'],
+                        'warning' => ['depo', 'hazirlaniyor'],
                         'info'    => 'kargolandi',
                         'danger'  => 'iptal',
                     ]),
-
-                Tables\Columns\TextColumn::make('total')
-                    ->label('Toplam')
-                    ->money('TRY', true),
-
-                Tables\Columns\TextColumn::make('creator.name')
-                    ->label('Oluşturan')
-                    ->toggleable(),
-
-                Tables\Columns\TextColumn::make('created_at')
-                    ->label('Oluşturma')
-                    ->since()
-                    ->sortable(),
+                Tables\Columns\TextColumn::make('total')->label('Toplam')->money('TRY', true),
+                Tables\Columns\TextColumn::make('creator.name')->label('Oluşturan')->toggleable(),
+                Tables\Columns\TextColumn::make('created_at')->label('Oluşturma')->since()->sortable(),
             ])
             ->actions([
                 Tables\Actions\Action::make('pdf')
