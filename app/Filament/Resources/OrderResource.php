@@ -26,7 +26,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Filament\Tables\Filters\Filter;
-use Filament\Tables\Filters\SelectFilter; // <--- Added this
+use Filament\Tables\Filters\SelectFilter; 
 use Filament\Tables\Enums\FiltersLayout;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Schema;
@@ -57,11 +57,7 @@ class OrderResource extends Resource
     public static function form(Form $form): Form
     {
         return $form
-            // 👇 Disables the entire form if status is 'depo' AND user is not 'depo'
-            ->disabled(function (?Order $record) {
-                if (! $record) return false;
-                return $record->status === 'depo' && !auth()->user()?->hasRole('depo');
-            })
+            // ❌ Removed the ->disabled() function from here to protect items data
             ->schema([
                 // LEFT
                 Group::make()
@@ -92,25 +88,21 @@ class OrderResource extends Resource
                                         }
                                     }),
 
-                                // Para Birimi (rate comes from Currency table; NOT editable here)
+                                // Para Birimi
                                 Select::make('currency_code')
                                     ->label('Para Birimi')
                                     ->options(fn () => Currency::activeOptions())
-                                    // default ONLY on create (no record yet) -> TRY
                                     ->default(fn ($record) => $record?->currency_code ?: 'TRY')
                                     ->required()
                                     ->native(false)
                                     ->dehydrated(true)
                                     ->reactive()
                                     ->afterStateHydrated(function ($state, Set $set, $record) {
-                                        // On create with blank state -> force TRY + its rate
                                         if (!$record && blank($state)) {
                                             $set('currency_code', 'TRY');
                                             $set('currency_rate', (float) (Currency::rateFor('TRY') ?? 1));
                                             return;
                                         }
-
-                                        // Otherwise, sync rate with whatever code is present
                                         $code = $state ?: 'TRY';
                                         $set('currency_rate', (float) (Currency::rateFor($code) ?? 1));
                                     })
@@ -121,7 +113,6 @@ class OrderResource extends Resource
                                         self::recalcTotals($set, $get);
                                     }),
 
-                                // Hidden field: stored on order; never edited directly
                                 Hidden::make('currency_rate')
                                     ->dehydrated(true)
                                     ->default(fn () => (float) (Currency::rateFor('TRY') ?? 1)),
@@ -284,7 +275,6 @@ class OrderResource extends Resource
                                                     ->afterStateUpdated(function ($state, Set $set, Get $get) {
                                                         if (! $state) return;
 
-                                                        // duplicate hint (allowed)
                                                         $items = $get('../../items') ?: [];
                                                         $count = 0;
                                                         foreach ($items as $row) {
@@ -304,7 +294,6 @@ class OrderResource extends Resource
 
                                                         $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
 
-                                                        // Price in order currency = product USD × selected rate
                                                         $rate = (float) ($get('../../currency_rate') ?? $get('currency_rate') ?? 1);
                                                         $unit = self::unitFromProductAndRate($p, $rate);
 
@@ -412,7 +401,6 @@ class OrderResource extends Resource
                                     ->dehydrated(true)
                                     ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_percent', 0) : null)
                                     ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
-                                    // no cross-sync; only totals:
                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => OrderResource::recalcTotals($set, $get)),
 
                                 TextInput::make('discount_amount')
@@ -423,7 +411,6 @@ class OrderResource extends Resource
                                     ->dehydrated(true)
                                     ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('discount_amount', 0) : null)
                                     ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
-                                    // no cross-sync; only totals:
                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => OrderResource::recalcTotals($set, $get)),
 
                                 TextInput::make('kdv_percent')
@@ -490,7 +477,6 @@ class OrderResource extends Resource
             ->columns(3);
     }
 
-    /** Refresh ALL item stock_snapshots when branch changes. */
     protected static function refreshAllItemStocksForBranch(Set $set, Get $get, int $branchId): void
     {
         $items = $get('items') ?? [];
@@ -502,7 +488,6 @@ class OrderResource extends Resource
         }
     }
 
-    /** Price helper: product USD × rate → rounded(2). */
     protected static function unitFromProductAndRate(?Product $p, float $rate): float
     {
         if (! $p) return 0.0;
@@ -510,7 +495,6 @@ class OrderResource extends Resource
         return round($usd * max(0, $rate), 2);
     }
 
-    /** Recompute all item unit prices from product.usd × rate (called on currency change). */
     public static function repriceAllItemsFromProducts(Set $set, Get $get, float $rate): void
     {
         $items = $get('items') ?? [];
@@ -523,7 +507,6 @@ class OrderResource extends Resource
         }
     }
 
-    /** Return stock for product at branch (0 if none). */
     protected static function branchStock(int $productId, ?int $branchId): int
     {
         if (! $productId || ! $branchId) return 0;
@@ -533,7 +516,6 @@ class OrderResource extends Resource
             ->value('stock') ?? 0);
     }
 
-    /** Prefill billing only when fields are blank (on hydrate). */
     protected static function fillBillingFromCustomer(Set $set, Get $get): void
     {
         $customerId = $get('customer_id');
@@ -549,10 +531,7 @@ class OrderResource extends Resource
         };
 
         $fillIfBlank('billing_phone',         $u->phone ?? null);
-        
-        // 👇 THIS LINE FIXES THE ISSUE ON PAGE LOAD
         $fillIfBlank('billing_tax_number',    $u->tax_number ?? null); 
-        
         $fillIfBlank('billing_address_line1', $u->billing_address_line1 ?? null);
         $fillIfBlank('billing_address_line2', $u->billing_address_line2 ?? null);
         $fillIfBlank('billing_city',          $u->billing_city ?? null);
@@ -570,7 +549,6 @@ class OrderResource extends Resource
         $fillIfBlank('billing_country',  $u->billing_country ?? 'TR');
     }
 
-    /** Overwrite billing when user explicitly changes the customer. */
     protected static function overwriteBillingFromCustomer(Set $set, Get $get): void
     {
         $customerId = $get('customer_id');
@@ -590,10 +568,7 @@ class OrderResource extends Resource
 
         $set('billing_name',          $u->name ?? null);
         $set('billing_phone',         $u->phone ?? null);
-        
-        // 👇 THIS LINE FIXES THE ISSUE WHEN SELECTING/CREATING A CUSTOMER
         $set('billing_tax_number',    $u->tax_number ?? null); 
-        
         $set('billing_address_line1', $u->billing_address_line1 ?? null);
         $set('billing_address_line2', $u->billing_address_line2 ?? null);
         $set('billing_city',          $u->billing_city ?? null);
@@ -622,8 +597,6 @@ class OrderResource extends Resource
         $discountAmount  = (float) ($get('../../discount_amount')  ?? $get('discount_amount')  ?? 0);
         $shippingAmount  = (float) ($get('../../shipping_amount')  ?? $get('shipping_amount')  ?? 0);
 
-        // Pick the larger of percent or amount (but DO NOT mutate the fields),
-        // then cap by subtotal:
         $percentDiscount = round($sub * $discountPercent / 100, 2);
         $finalDiscount   = min(max($discountAmount, $percentDiscount), $sub);
 
@@ -639,19 +612,18 @@ class OrderResource extends Resource
     {
         $isSeller = auth()->user()?->hasRole('seller') && ! auth()->user()?->hasRole('admin');
         $isDepo   = auth()->user()?->hasRole('depo') && ! auth()->user()?->hasRole('admin');
+        
         return $table
             ->query(fn () => Order::query()
                 ->when($isSeller, fn ($q) => $q->where('created_by_id', auth()->id()))
                 ->when($isDepo, fn ($q) => $q->whereIn('status', ['depo', 'hazirlaniyor', 'kargolandi']))
             )
             ->filters([
-                // -------- NEW: SELLER FILTER (Only for Admin) --------
                 SelectFilter::make('created_by_id')
                     ->label('Satış Temsilcisi')
                     ->searchable()
                     ->options(fn () => User::whereHas('roles', fn ($q) => $q->where('name', 'seller'))->pluck('name', 'id'))
-                    ->visible(! $isSeller), // Hide if user is a seller (they see only own orders anyway)
-                // -----------------------------------------------------
+                    ->visible(! $isSeller), 
 
                 Filter::make('durumlar')
                     ->label('Durum')
@@ -723,14 +695,33 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('created_at')->label('Oluşturma')->since()->sortable(),
             ])
             ->actions([
-                Tables\Actions\EditAction::make()->label('Düzenle')->visible(fn ($record) => $record->status !== 'tamamlandi'),
+                // 👇 1. ADDED VIEW ACTION FOR ADMINS/SELLERS
+                Tables\Actions\ViewAction::make()
+                    ->label('Görüntüle')
+                    ->visible(function ($record) {
+                        // Show "View" if it's completed, OR if it's 'depo' and user is not depo
+                        if ($record->status === 'tamamlandi') return true;
+                        if ($record->status === 'depo' && !auth()->user()?->hasRole('depo')) return true;
+                        return false;
+                    }),
+
+                // 👇 2. RESTRICTED EDIT ACTION
+                Tables\Actions\EditAction::make()
+                    ->label('Düzenle')
+                    ->visible(function ($record) {
+                        // Hide "Edit" if it's completed, OR if it's 'depo' and user is not depo
+                        if ($record->status === 'tamamlandi') return false;
+                        if ($record->status === 'depo' && !auth()->user()?->hasRole('depo')) return false;
+                        return true;
+                    }),
+
                 Tables\Actions\Action::make('pdf')
                     ->label('PDF')
                     ->icon('heroicon-o-document-text')
                     ->button()
                     ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
-                    // 👇 UPDATE THIS LINE
                     ->url(fn ($record) => route('orders.pdf', ['order' => $record, 't' => time()]), shouldOpenInNewTab: true),
+                
                 Tables\Actions\DeleteAction::make()
                     ->label('Sil')
                     ->icon('heroicon-o-trash')
@@ -814,6 +805,7 @@ class OrderResource extends Resource
         return [
             'index'  => Pages\ListOrders::route('/'),
             'create' => Pages\CreateOrder::route('/create'),
+            'view'   => Pages\ViewOrder::route('/{record}'), // 👇 3. ADDED VIEW ROUTE
             'edit'   => Pages\EditOrder::route('/{record}/edit'),
         ];
     }
@@ -826,7 +818,6 @@ class OrderResource extends Resource
         }
     }
 
-    /** @return array<string,string> kod => ad */
     protected static function turkishProvinces(): array
     {
         return [
@@ -920,7 +911,6 @@ class OrderResource extends Resource
     {
         return number_format((float) $v, 2, '.', '');
     }
-
 
     public static function getEloquentQuery(): Builder
     {

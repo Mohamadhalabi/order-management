@@ -120,4 +120,15 @@ class EditOrder extends EditRecord
         $this->originalBranchId = (int) $order->branch_id;
         $this->originalItems    = $this->itemsArrayFromDb();
     }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            \Filament\Actions\Action::make('pdf')
+                ->label('PDF İndir')
+                ->icon('heroicon-o-document-text')
+                ->color('info')
+                ->url(fn () => route('orders.pdf', ['order' => $this->record, 't' => time()]), shouldOpenInNewTab: true),
+        ];
+    }
 }
