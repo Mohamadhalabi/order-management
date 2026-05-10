@@ -59,18 +59,17 @@ class EditOrder extends EditRecord
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        // Get everything exactly as it is on the form
-        $state = $this->form->getRawState();
+        $rawState = $this->form->getRawState();
 
-        if (array_key_exists('customer_id', $state)) {
-            $data['customer_id'] = (int) $state['customer_id'];
+        if (array_key_exists('customer_id', $rawState)) {
+            $data['customer_id'] = (int) $rawState['customer_id'];
         }
 
-        // Keep items temporarily so totals can be recomputed
-        $data['items'] = $state['items'] ?? [];
+        // Merge items only for total recomputation
+        $data['items'] = $rawState['items'] ?? [];
         $data = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
 
-        // 👇 ADD THIS LINE: Remove the items array before saving so Laravel doesn't crash!
+        // Remove before save — relationship handles items separately
         unset($data['items']);
 
         return $data;
@@ -119,6 +118,13 @@ class EditOrder extends EditRecord
 
         $this->originalBranchId = (int) $order->branch_id;
         $this->originalItems    = $this->itemsArrayFromDb();
+
+        // 👇 ADD THIS
+        \Filament\Notifications\Notification::make()
+            ->title('Sipariş güncellendi')
+            ->body("#{$order->id} numaralı sipariş başarıyla kaydedildi.")
+            ->success()
+            ->send();
     }
 
     protected function getHeaderActions(): array

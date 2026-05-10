@@ -214,7 +214,7 @@ class OrderResource extends Resource
                             ->schema([
                                 Repeater::make('items')
                                     ->relationship()
-                                    ->dehydrated(false)
+                                    // ->dehydrated(false)
                                     ->minItems(1)
                                     ->required()
                                     ->defaultItems(1)
@@ -579,7 +579,7 @@ class OrderResource extends Resource
 
     protected static function recalcTotals(Set $set, Get $get): void
     {
-        usleep(400000);
+        // usleep(400000);
 
         $items = $get('../../items') ?? $get('items') ?? [];
         $sub = 0.0;

@@ -28,10 +28,11 @@ class CreateOrder extends CreateRecord
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        $state   = $this->form->getRawState() ?: request()->input('data', []);
-        $payload = array_merge($data, $state);
+        // Items are never in $data when using ->relationship() on Repeater
+        // So we read them from raw state only for validation + total calculation
+        $rawState = $this->form->getRawState();
+        $items = $rawState['items'] ?? [];
 
-        $items = $payload['items'] ?? [];
         if (empty($items)) {
             \Filament\Notifications\Notification::make()
                 ->title('Siparişe en az 1 ürün eklemelisiniz.')
@@ -40,17 +41,19 @@ class CreateOrder extends CreateRecord
             $this->halt();
         }
 
-        if (isset($payload['customer_id'])) {
-            $payload['customer_id'] = (int) $payload['customer_id'];
+        if (isset($data['customer_id'])) {
+            $data['customer_id'] = (int) $data['customer_id'];
         }
 
-        $payload = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($payload);
-        $payload['created_by_id'] = \Illuminate\Support\Facades\Auth::id();
+        // Merge items into $data only for recomputing totals
+        $data['items'] = $items;
+        $data = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
+        $data['created_by_id'] = \Illuminate\Support\Facades\Auth::id();
 
-        // 👇 FIX: Remove items relationship array so Laravel doesn't crash on insert!
-        unset($payload['items']);
+        // Remove items before DB insert — relationship saves them separately
+        unset($data['items']);
 
-        return $payload;
+        return $data;
     }
 
     /**
