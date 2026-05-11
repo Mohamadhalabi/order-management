@@ -209,162 +209,162 @@ class OrderResource extends Resource
                                 Textarea::make('notes')->label('Notlar')->rows(2),
                             ])
                             ->columns(3),
+                            Section::make('Kalemler')
+                                ->schema([
+                                    Repeater::make('items')
+                                        ->relationship()
+                                        // ->dehydrated(false)
+                                        ->minItems(1)
+                                        ->required()
+                                        ->defaultItems(1)
+                                        ->collapsible(false)
+                                        ->reorderable(false)
+                                        ->schema([
+                                            Grid::make(['default' => 1, 'sm' => 12, 'md' => 12, 'lg' => 12, 'xl' => 12])
+                                                ->extraAttributes(function (Get $get) {
+                                                    $pid = $get('product_id');
+                                                    if (! $pid) return [];
+                                                    $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
+                                                    $live = self::branchStock($pid, $branchId);
+                                                    return $live <= 0
+                                                        ? ['style' => 'border:1px solid #dc2626;border-radius:8px;padding:8px;']
+                                                        : [];
+                                                })
+                                                ->schema([
+                                                    ViewComponent::make('filament.components.product-thumb')
+                                                        ->viewData(function (Get $get) {
+                                                            $url = $get('image_url');
+                                                            if ($url && ! str_starts_with($url, 'http')) {
+                                                                $url = Storage::url($url);
+                                                            }
+                                                            return ['url' => $url, 'size' => 72];
+                                                        })
+                                                        ->columnSpan(['default' => 12, 'sm' => 2, 'md' => 2, 'lg' => 2, 'xl' => 2]),
 
-                        Section::make('Kalemler')
-                            ->schema([
-                                Repeater::make('items')
-                                    ->relationship()
-                                    // ->dehydrated(false)
-                                    ->minItems(1)
-                                    ->required()
-                                    ->defaultItems(1)
-                                    ->collapsible(false)
-                                    ->reorderable(false)
-                                    ->schema([
-                                        Grid::make(['default' => 1, 'sm' => 12, 'md' => 12, 'lg' => 12, 'xl' => 12])
-                                            ->extraAttributes(function (Get $get) {
-                                                $pid = $get('product_id');
-                                                if (! $pid) return [];
-                                                $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                $live = self::branchStock($pid, $branchId);
-                                                return $live <= 0
-                                                    ? ['style' => 'border:1px solid #dc2626;border-radius:8px;padding:8px;']
-                                                    : [];
-                                            })
-                                            ->schema([
-                                                ViewComponent::make('filament.components.product-thumb')
-                                                    ->viewData(function (Get $get) {
-                                                        $url = $get('image_url');
-                                                        if ($url && ! str_starts_with($url, 'http')) {
-                                                            $url = Storage::url($url);
-                                                        }
-                                                        return ['url' => $url, 'size' => 72];
-                                                    })
-                                                    ->columnSpan(['default' => 12, 'sm' => 2, 'md' => 2, 'lg' => 2, 'xl' => 2]),
-
-                                                Select::make('product_id')
-                                                    ->label('Ürün')
-                                                    ->required()
-                                                    ->searchable()
-                                                    ->native(false)
-                                                    ->columnSpan(['default' => 12, 'sm' => 10, 'md' => 10, 'lg' => 10, 'xl' => 10])
-                                                    ->helperText(function (Get $get) {
-                                                        $pid = $get('product_id');
-                                                        if (! $pid) return null;
-                                                        $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                        $live     = self::branchStock($pid, $branchId);
-                                                        if ($live <= 0) {
-                                                            return new HtmlString('<span style="color:#dc2626;font-weight:600;">Bu ürün bu şubede stokta yok</span>');
-                                                        }
-                                                        return null;
-                                                    })
-                                                    ->getSearchResultsUsing(function (string $search) {
-                                                        $like = "%{$search}%";
-                                                        return Product::query()
-                                                            ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))
-                                                            ->limit(50)
-                                                            ->get()
-                                                            ->mapWithKeys(fn ($p) => [$p->id => "{$p->sku} | {$p->name}"])
-                                                            ->toArray();
-                                                    })
-                                                    ->getOptionLabelUsing(function ($value) {
-                                                        $p = Product::find($value);
-                                                        return $p ? "{$p->sku} | {$p->name}" : null;
-                                                    })
-                                                    ->reactive()
-                                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                                        if (! $state) return;
-
-                                                        $items = $get('../../items') ?: [];
-                                                        $count = 0;
-                                                        foreach ($items as $row) {
-                                                            if (($row['product_id'] ?? null) == $state) $count++;
-                                                        }
-                                                        if ($count > 1) {
-                                                            \Filament\Notifications\Notification::make()
-                                                                ->title('Bu ürün zaten siparişte mevcut.')
-                                                                ->body('Aynı ürünü birden fazla kez ekliyorsunuz. Devam etmek istediğinize emin misiniz?')
-                                                                ->warning()
-                                                                ->persistent()
-                                                                ->send();
-                                                        }
-
-                                                        $p = Product::find($state);
-                                                        if (! $p) return;
-
-                                                        $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-
-                                                        $rate = (float) ($get('../../currency_rate') ?? $get('currency_rate') ?? 1);
-                                                        $unit = self::unitFromProductAndRate($p, $rate);
-
-                                                        $stock = (int) self::branchStock($p->id, $branchId);
-                                                        $img   = $p->image ?: null;
-
-                                                        $set('unit_price', $unit);
-                                                        $set('stock_snapshot', $stock);
-                                                        $set('product_name', $p->name);
-                                                        $set('sku', $p->sku);
-                                                        $set('image_url', $img);
-
-                                                        if ($stock <= 0) {
-                                                            \Filament\Notifications\Notification::make()
-                                                                ->title('Bu ürün bu şubede stokta yok')
-                                                                ->danger()->send();
-                                                        }
-
-                                                        self::recalcTotals($set, $get);
-                                                    }),
-                                                TextInput::make('qty')
-                                                    ->label('Adet')
-                                                    ->numeric()
-                                                    ->rule('integer')
-                                                    ->required()
-                                                    ->minValue(1)
-                                                    ->default(1)
-                                                    ->live(onBlur: true)
-                                                    ->dehydrateStateUsing(fn ($state) => max(1, (int) ($state ?? 1)))
-                                                    ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
-                                                    ->helperText(function (Get $get) {
-                                                        $pid = $get('product_id');
-                                                        if (! $pid) return null;
-                                                        $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                        $live     = self::branchStock($pid, $branchId);
-                                                        $style    = $live > 0 ? 'color:#16a34a;font-weight:600;' : 'color:#dc2626;font-weight:600;';
-                                                        return new HtmlString("<span style=\"{$style}\">Stok (şube): {$live}</span>");
-                                                    })
-                                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
-
-                                                TextInput::make('unit_price')
-                                                    ->label('Birim Fiyat')
-                                                    ->numeric()
-                                                    ->required()
-                                                    ->minValue(0)
-                                                    ->default(0)
-                                                    ->live(onBlur: true)
-                                                    ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
-                                                    ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
-                                                TextInput::make('product_name')->hidden()->dehydrated(),
-                                                TextInput::make('sku')->hidden()->dehydrated(),
-
-                                                TextInput::make('stock_snapshot')->hidden()->dehydrated()
-                                                    ->afterStateHydrated(function ($state, Set $set, Get $get) {
-                                                        if ($pid = $get('product_id')) {
+                                                    Select::make('product_id')
+                                                        ->label('Ürün')
+                                                        ->required()
+                                                        ->searchable()
+                                                        ->native(false)
+                                                        ->columnSpan(['default' => 12, 'sm' => 10, 'md' => 10, 'lg' => 10, 'xl' => 10])
+                                                        ->helperText(function (Get $get) {
+                                                            $pid = $get('product_id');
+                                                            if (! $pid) return null;
                                                             $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                            $set('stock_snapshot', self::branchStock($pid, $branchId));
-                                                        }
-                                                    }),
+                                                            $live     = self::branchStock($pid, $branchId);
+                                                            if ($live <= 0) {
+                                                                return new HtmlString('<span style="color:#dc2626;font-weight:600;">Bu ürün bu şubede stokta yok</span>');
+                                                            }
+                                                            return null;
+                                                        })
+                                                        ->getSearchResultsUsing(function (string $search) {
+                                                            $like = "%{$search}%";
+                                                            return Product::query()
+                                                                ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))
+                                                                ->limit(50)
+                                                                ->get()
+                                                                ->mapWithKeys(fn ($p) => [$p->id => "{$p->sku} | {$p->name}"])
+                                                                ->toArray();
+                                                        })
+                                                        ->getOptionLabelUsing(function ($value) {
+                                                            $p = Product::find($value);
+                                                            return $p ? "{$p->sku} | {$p->name}" : null;
+                                                        })
+                                                        ->reactive()
+                                                        ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                                            if (! $state) return;
 
-                                                TextInput::make('image_url')->hidden()->dehydrated()
-                                                    ->afterStateHydrated(function ($state, Set $set, Get $get) {
-                                                        if (!$state && ($pid = $get('product_id'))) {
-                                                            if ($img = Product::find($pid)?->image) $set('image_url', $img);
-                                                        }
-                                                    }),
-                                            ]),
-                                    ])
-                                    ->createItemButtonLabel('Kalem ekle')
-                                    ->afterStateUpdated(fn (Set $set, Get $get) => self::recalcTotals($set, $get)),
-                            ]),
+                                                            $items = $get('../../items') ?: [];
+                                                            $count = 0;
+                                                            foreach ($items as $row) {
+                                                                if (($row['product_id'] ?? null) == $state) $count++;
+                                                            }
+                                                            if ($count > 1) {
+                                                                \Filament\Notifications\Notification::make()
+                                                                    ->title('Bu ürün zaten siparişte mevcut.')
+                                                                    ->body('Aynı ürünü birden fazla kez ekliyorsunuz. Devam etmek istediğinize emin misiniz?')
+                                                                    ->warning()
+                                                                    ->persistent()
+                                                                    ->send();
+                                                            }
+
+                                                            $p = Product::find($state);
+                                                            if (! $p) return;
+
+                                                            $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
+                                                            $rate = (float) ($get('../../currency_rate') ?? $get('currency_rate') ?? 1);
+                                                            $unit = self::unitFromProductAndRate($p, $rate);
+                                                            $stock = (int) self::branchStock($p->id, $branchId);
+                                                            $img   = $p->image ?: null;
+
+                                                            $set('unit_price', $unit);
+                                                            $set('stock_snapshot', $stock);
+                                                            $set('product_name', $p->name);
+                                                            $set('sku', $p->sku);
+                                                            $set('image_url', $img);
+
+                                                            if ($stock <= 0) {
+                                                                \Filament\Notifications\Notification::make()
+                                                                    ->title('Bu ürün bu şubede stokta yok')
+                                                                    ->danger()->send();
+                                                            }
+
+                                                            self::recalcTotals($set, $get);
+                                                        }),
+
+                                                    // ✅ NO ->live() NO ->afterStateUpdated()
+                                                    TextInput::make('qty')
+                                                        ->label('Adet')
+                                                        ->numeric()
+                                                        ->rule('integer')
+                                                        ->required()
+                                                        ->minValue(1)
+                                                        ->default(1)
+                                                        ->dehydrateStateUsing(fn ($state) => max(1, (int) ($state ?? 1)))
+                                                        ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
+                                                        ->helperText(function (Get $get) {
+                                                            $pid = $get('product_id');
+                                                            if (! $pid) return null;
+                                                            $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
+                                                            $live     = self::branchStock($pid, $branchId);
+                                                            $style    = $live > 0 ? 'color:#16a34a;font-weight:600;' : 'color:#dc2626;font-weight:600;';
+                                                            return new HtmlString("<span style=\"{$style}\">Stok (şube): {$live}</span>");
+                                                        }),
+
+                                                    // ✅ NO ->live() NO ->afterStateUpdated()
+                                                    TextInput::make('unit_price')
+                                                        ->label('Birim Fiyat')
+                                                        ->numeric()
+                                                        ->required()
+                                                        ->minValue(0)
+                                                        ->default(0)
+                                                        ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6]),
+
+                                                    TextInput::make('product_name')->hidden()->dehydrated(),
+                                                    TextInput::make('sku')->hidden()->dehydrated(),
+
+                                                    TextInput::make('stock_snapshot')->hidden()->dehydrated()
+                                                        ->afterStateHydrated(function ($state, Set $set, Get $get) {
+                                                            if ($pid = $get('product_id')) {
+                                                                $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
+                                                                $set('stock_snapshot', self::branchStock($pid, $branchId));
+                                                            }
+                                                        }),
+
+                                                    TextInput::make('image_url')->hidden()->dehydrated()
+                                                        ->afterStateHydrated(function ($state, Set $set, Get $get) {
+                                                            if (!$state && ($pid = $get('product_id'))) {
+                                                                if ($img = Product::find($pid)?->image) $set('image_url', $img);
+                                                            }
+                                                        }),
+                                                ]),
+                                        ])
+                                        ->createItemButtonLabel('Kalem ekle')
+                                        ->afterStateUpdated(fn (Set $set, Get $get) => self::recalcTotals($set, $get)),
+
+                                    // ✅ THIS IS THE ONLY THING ADDED — the JS calculator
+                                    ViewComponent::make('filament.components.order-totals-calculator'),
+                                ]),
                     ])
                     ->columnSpan(2),
 
