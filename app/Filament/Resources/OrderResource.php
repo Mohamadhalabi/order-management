@@ -322,7 +322,7 @@ class OrderResource extends Resource
                                                     ->required()
                                                     ->minValue(1)
                                                     ->default(1)
-                                                    ->live(onBlur: true)
+                                                    ->live()            // ← remove onBlur: true
                                                     ->dehydrateStateUsing(fn ($state) => max(1, (int) ($state ?? 1)))
                                                     ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                     ->helperText(function (Get $get) {
@@ -341,7 +341,7 @@ class OrderResource extends Resource
                                                     ->required()
                                                     ->minValue(0)
                                                     ->default(0)
-                                                    ->live(onBlur: true)
+                                                    ->live()            // ← remove onBlur: true
                                                     ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
 
@@ -579,17 +579,23 @@ class OrderResource extends Resource
 
     protected static function recalcTotals(Set $set, Get $get): void
     {
-        // usleep(400000);
+        // Try all possible paths to get items
+        $items = [];
+        
+        foreach (['items', '../items', '../../items', '../../../items'] as $path) {
+            $val = $get($path);
+            if (!empty($val) && is_array($val)) {
+                $items = $val;
+                break;
+            }
+        }
 
-        $items = $get('../../items') ?? $get('items') ?? [];
         $sub = 0.0;
-
         foreach ($items as $row) {
             $qty   = (float) ($row['qty'] ?? 0);
             $price = (float) ($row['unit_price'] ?? 0);
             $sub  += $qty * $price;
         }
-
         $sub = round($sub, 2);
 
         $kdvPercent      = (float) ($get('../../kdv_percent')      ?? $get('kdv_percent')      ?? 0);
@@ -603,9 +609,9 @@ class OrderResource extends Resource
         $taxBase   = max($sub - $finalDiscount, 0);
         $kdvAmount = round($taxBase * $kdvPercent / 100, 2);
 
-        self::setRoot($set, 'subtotal', $sub);
+        self::setRoot($set, 'subtotal',   $sub);
         self::setRoot($set, 'kdv_amount', $kdvAmount);
-        self::setRoot($set, 'total', round($taxBase + $shippingAmount + $kdvAmount, 2));
+        self::setRoot($set, 'total',      round($taxBase + $shippingAmount + $kdvAmount, 2));
     }
 
     public static function table(Table $table): Table

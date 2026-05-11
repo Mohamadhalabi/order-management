@@ -65,13 +65,10 @@ class EditOrder extends EditRecord
             $data['customer_id'] = (int) $rawState['customer_id'];
         }
 
-        // Merge items only for total recomputation
         $data['items'] = $rawState['items'] ?? [];
         $data = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
 
-        // Remove before save — relationship handles items separately
         unset($data['items']);
-
         return $data;
     }
 

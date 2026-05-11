@@ -28,8 +28,6 @@ class CreateOrder extends CreateRecord
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // Items are never in $data when using ->relationship() on Repeater
-        // So we read them from raw state only for validation + total calculation
         $rawState = $this->form->getRawState();
         $items = $rawState['items'] ?? [];
 
@@ -45,14 +43,11 @@ class CreateOrder extends CreateRecord
             $data['customer_id'] = (int) $data['customer_id'];
         }
 
-        // Merge items into $data only for recomputing totals
         $data['items'] = $items;
         $data = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
         $data['created_by_id'] = \Illuminate\Support\Facades\Auth::id();
 
-        // Remove items before DB insert — relationship saves them separately
         unset($data['items']);
-
         return $data;
     }
 
