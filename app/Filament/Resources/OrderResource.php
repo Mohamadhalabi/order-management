@@ -314,7 +314,6 @@ class OrderResource extends Resource
 
                                                         self::recalcTotals($set, $get);
                                                     }),
-
                                                 TextInput::make('qty')
                                                     ->label('Adet')
                                                     ->numeric()
@@ -322,7 +321,7 @@ class OrderResource extends Resource
                                                     ->required()
                                                     ->minValue(1)
                                                     ->default(1)
-                                                    ->live()            // ← remove onBlur: true
+                                                    ->live(onBlur: true)
                                                     ->dehydrateStateUsing(fn ($state) => max(1, (int) ($state ?? 1)))
                                                     ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                     ->helperText(function (Get $get) {
@@ -341,10 +340,9 @@ class OrderResource extends Resource
                                                     ->required()
                                                     ->minValue(0)
                                                     ->default(0)
-                                                    ->live()            // ← remove onBlur: true
+                                                    ->live(onBlur: true)
                                                     ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
                                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::recalcTotals($set, $get)),
-
                                                 TextInput::make('product_name')->hidden()->dehydrated(),
                                                 TextInput::make('sku')->hidden()->dehydrated(),
 
