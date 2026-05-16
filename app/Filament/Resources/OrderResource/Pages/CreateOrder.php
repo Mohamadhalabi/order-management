@@ -15,7 +15,7 @@ class CreateOrder extends CreateRecord
 {
     protected static string $resource = OrderResource::class;
 
-    protected static ?string $title = 'Sipariş Oluştur';
+    protected static ?string $title      = 'Sipariş Oluştur';
     protected static ?string $breadcrumb = 'Oluştur';
 
     protected function getFormActions(): array
@@ -29,7 +29,7 @@ class CreateOrder extends CreateRecord
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $rawState = $this->form->getRawState();
-        $items = $rawState['items'] ?? [];
+        $items    = $rawState['items'] ?? [];
 
         if (empty($items)) {
             \Filament\Notifications\Notification::make()
@@ -44,7 +44,7 @@ class CreateOrder extends CreateRecord
         }
 
         $data['items'] = $items;
-        $data = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
+        $data          = \App\Filament\Resources\OrderResource::recomputeTotalsFromArray($data);
         $data['created_by_id'] = \Illuminate\Support\Facades\Auth::id();
 
         unset($data['items']);
@@ -53,39 +53,36 @@ class CreateOrder extends CreateRecord
 
     /**
      * After create:
-     *  - Sync the tax number back to the user
-     *  - Deduct branch stock for each line (by ordered qty)
-     *  - Update each item's stock_snapshot to remaining stock in that branch
+     *  - Sync tax number back to the user
+     *  - Deduct branch stock for each line
+     *  - Update each item's stock_snapshot to remaining branch stock
      *  - Generate PDF
      */
     protected function afterCreate(): void
     {
         $order = $this->record->fresh(['items', 'customer', 'creator']);
 
-        // 👇 FIX: Sync the Vergi Numarası back to the User Profile
-        if ($order->customer_id && !empty($order->billing_tax_number)) {
+        // Sync Vergi Numarası back to User Profile
+        if ($order->customer_id && ! empty($order->billing_tax_number)) {
             \App\Models\User::where('id', $order->customer_id)
                 ->update(['tax_number' => $order->billing_tax_number]);
         }
 
-        // Convert items to simple arrays for the service
         $newItems = $order->items->map(fn ($i) => [
             'product_id' => (int) $i->product_id,
             'qty'        => (int) $i->qty,
         ])->values()->all();
 
-        // Apply branch-level stock moves
         $remaining = BranchStockService::applyForCreateOrEdit(
             oldBranchId: null,
             newBranchId: (int) $order->branch_id,
-            oldItems: [],
-            newItems: $newItems
+            oldItems:    [],
+            newItems:    $newItems
         );
 
-        // Update stock_snapshot per item to remaining branch stock (optional but useful)
         DB::transaction(function () use ($order, $remaining) {
             foreach ($order->items as $item) {
-                $pid = (int) $item->product_id;
+                $pid  = (int) $item->product_id;
                 $left = $remaining[$pid] ?? ProductBranchStock::query()
                     ->where('branch_id', $order->branch_id)
                     ->where('product_id', $pid)
@@ -95,13 +92,16 @@ class CreateOrder extends CreateRecord
             }
         });
 
-        // PDF
-        $pdf = Pdf::loadView('pdf.order', ['order' => $order->fresh(['items.product', 'customer', 'creator'])]);
-        
-        // Ensure correct encoding for Turkish characters in PDF
-        $html = view('pdf.order', ['order' => $order->fresh(['items.product', 'customer', 'creator']), 'brand' => $this->brandMeta(), 'code' => $order->currency_code ?: 'USD', 'sym' => \App\Models\Currency::symbolFor($order->currency_code ?: 'USD') ?: ($order->currency_code ?: 'USD')])->render();
+        // Generate PDF
+        $html = view('pdf.order', [
+            'order' => $order->fresh(['items.product', 'customer', 'creator']),
+            'brand' => $this->brandMeta(),
+            'code'  => $order->currency_code ?: 'USD',
+            'sym'   => \App\Models\Currency::symbolFor($order->currency_code ?: 'USD') ?: ($order->currency_code ?: 'USD'),
+        ])->render();
+
         $html = mb_convert_encoding($html, 'HTML-ENTITIES', 'UTF-8');
-        $pdf = Pdf::loadHTML($html)->setPaper('a4', 'portrait');
+        $pdf  = Pdf::loadHTML($html)->setPaper('a4', 'portrait');
 
         $path = "orders/{$order->id}.pdf";
         Storage::disk('public')->put($path, $pdf->output());

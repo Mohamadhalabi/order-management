@@ -26,7 +26,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Filament\Tables\Filters\Filter;
-use Filament\Tables\Filters\SelectFilter; 
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Enums\FiltersLayout;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Schema;
@@ -39,10 +39,15 @@ class OrderResource extends Resource
     protected static ?string $model = Order::class;
     protected static ?string $navigationIcon = 'heroicon-o-receipt-refund';
 
-    protected static ?string $navigationGroup   = 'Satışlar';
-    protected static ?string $navigationLabel   = 'Siparişler';
-    protected static ?string $pluralModelLabel  = 'Siparişler';
-    protected static ?string $modelLabel        = 'Sipariş';
+    protected static ?string $navigationGroup  = 'Satışlar';
+    protected static ?string $navigationLabel  = 'Siparişler';
+    protected static ?string $pluralModelLabel = 'Siparişler';
+    protected static ?string $modelLabel       = 'Sipariş';
+
+    // ─────────────────────────────────────────────────────────────
+    // FIX 1: In-memory stock cache — prevents N DB queries per render
+    // ─────────────────────────────────────────────────────────────
+    protected static array $_stockCache = [];
 
     public static function canViewAny(): bool
     {
@@ -54,16 +59,46 @@ class OrderResource extends Resource
         return static::canViewAny();
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // FIX 2: Cached branchStock() — one DB hit per product+branch pair per request
+    // ─────────────────────────────────────────────────────────────
+    protected static function branchStock(int $productId, ?int $branchId): int
+    {
+        if (! $productId || ! $branchId) return 0;
+
+        $key = "{$productId}_{$branchId}";
+
+        if (! isset(self::$_stockCache[$key])) {
+            self::$_stockCache[$key] = (int) (ProductBranchStock::query()
+                ->where('product_id', $productId)
+                ->where('branch_id', $branchId)
+                ->value('stock') ?? 0);
+        }
+
+        return self::$_stockCache[$key];
+    }
+
+    protected static function clearStockCache(): void
+    {
+        self::$_stockCache = [];
+    }
+
+    // Called from EditOrder::afterFill() to prime the cache from a batch query
+    public static function primeStockCache(int $productId, int $branchId, int $stock): void
+    {
+        self::$_stockCache["{$productId}_{$branchId}"] = $stock;
+    }
+
     public static function form(Form $form): Form
     {
         return $form
-            // ❌ Removed the ->disabled() function from here to protect items data
             ->schema([
-                // LEFT
+                // ── LEFT ─────────────────────────────────────────
                 Group::make()
                     ->schema([
                         Section::make('Sipariş')
                             ->schema([
+
                                 // Şube
                                 Select::make('branch_id')
                                     ->label('Şube')
@@ -77,8 +112,11 @@ class OrderResource extends Resource
                                         if ($record) return null;
                                         return \App\Models\Branch::orderBy('id')->value('id');
                                     })
-                                    ->reactive()
+                                    // FIX: live(onBlur) instead of reactive() — avoids re-render on every keystroke
+                                    ->live(onBlur: true)
                                     ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                        // Bust cache when branch changes so fresh DB data is loaded
+                                        self::clearStockCache();
                                         self::refreshAllItemStocksForBranch($set, $get, (int) $state);
                                         self::recalcTotals($set, $get);
                                     })
@@ -96,9 +134,9 @@ class OrderResource extends Resource
                                     ->required()
                                     ->native(false)
                                     ->dehydrated(true)
-                                    ->reactive()
+                                    ->live(onBlur: true)
                                     ->afterStateHydrated(function ($state, Set $set, $record) {
-                                        if (!$record && blank($state)) {
+                                        if (! $record && blank($state)) {
                                             $set('currency_code', 'TRY');
                                             $set('currency_rate', (float) (Currency::rateFor('TRY') ?? 1));
                                             return;
@@ -142,16 +180,14 @@ class OrderResource extends Resource
                                             ->whereDoesntHave('roles', fn ($r) => $r->where('name', 'seller'))
                                             ->value('name');
                                     })
-                                    ->reactive()
+                                    ->live(onBlur: true)
                                     ->createOptionForm([
                                         TextInput::make('name')->label('Ad Soyad')->required(),
                                         TextInput::make('email')->label('E-posta')->email()
                                             ->rules(['nullable', 'email', 'max:191', \Illuminate\Validation\Rule::unique('users', 'email')]),
                                         TextInput::make('phone')->label('Telefon')->tel()
                                             ->rules(['nullable', 'string', 'max:20']),
-
                                         TextInput::make('tax_number')->label('Vergi Numarası')->maxLength(100),
-
                                         Forms\Components\Fieldset::make('Fatura Adresi')->schema([
                                             TextInput::make('billing_address_line1')->label('Adres Satırı'),
                                             TextInput::make('billing_city')->label('Şehir / İlçe'),
@@ -169,22 +205,17 @@ class OrderResource extends Resource
                                         $u->name  = $data['name'] ?? (explode('@', $data['email'])[0] ?? 'Müşteri');
                                         $u->email = $data['email'] ?? null;
                                         $u->phone = $data['phone'] ?? null;
-
                                         $u->tax_number = $data['tax_number'] ?? null;
-                                        
                                         $u->billing_address_line1 = $data['billing_address_line1'] ?? null;
                                         $u->billing_city          = $data['billing_city'] ?? null;
                                         $u->billing_state         = $data['billing_state'] ?? null;
                                         $u->billing_postcode      = $data['billing_postcode'] ?? null;
                                         $u->billing_country       = $data['billing_country'] ?? 'TR';
-
                                         $u->password = \Hash::make(Str::random(40));
                                         $u->save();
-
                                         if (\Spatie\Permission\Models\Role::where('name', 'customer')->exists()) {
                                             $u->assignRole('customer');
                                         }
-
                                         return $u->getKey();
                                     })
                                     ->afterStateUpdated(fn ($state, Set $set, Get $get) => self::overwriteBillingFromCustomer($set, $get))
@@ -209,166 +240,170 @@ class OrderResource extends Resource
                                 Textarea::make('notes')->label('Notlar')->rows(2),
                             ])
                             ->columns(3),
-                            Section::make('Kalemler')
-                                ->schema([
-                                    Repeater::make('items')
-                                        ->relationship()
-                                        // ->dehydrated(false)
-                                        ->minItems(1)
-                                        ->required()
-                                        ->defaultItems(1)
-                                        ->collapsible(false)
-                                        ->reorderable(false)
-                                        ->schema([
-                                            Grid::make(['default' => 1, 'sm' => 12, 'md' => 12, 'lg' => 12, 'xl' => 12])
-                                                ->extraAttributes(function (Get $get) {
-                                                    $pid = $get('product_id');
-                                                    if (! $pid) return [];
-                                                    $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                    $live = self::branchStock($pid, $branchId);
-                                                    return $live <= 0
-                                                        ? ['style' => 'border:1px solid #dc2626;border-radius:8px;padding:8px;']
-                                                        : [];
-                                                })
-                                                ->schema([
-                                                    ViewComponent::make('filament.components.product-thumb')
-                                                        ->viewData(function (Get $get) {
-                                                            $url = $get('image_url');
-                                                            if ($url && ! str_starts_with($url, 'http')) {
-                                                                $url = Storage::url($url);
-                                                            }
-                                                            return ['url' => $url, 'size' => 72];
-                                                        })
-                                                        ->columnSpan(['default' => 12, 'sm' => 2, 'md' => 2, 'lg' => 2, 'xl' => 2]),
 
-                                                    Select::make('product_id')
-                                                        ->label('Ürün')
-                                                        ->required()
-                                                        ->searchable()
-                                                        ->native(false)
-                                                        ->columnSpan(['default' => 12, 'sm' => 10, 'md' => 10, 'lg' => 10, 'xl' => 10])
-                                                        ->helperText(function (Get $get) {
-                                                            $pid = $get('product_id');
-                                                            if (! $pid) return null;
-                                                            $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                            $live     = self::branchStock($pid, $branchId);
-                                                            if ($live <= 0) {
-                                                                return new HtmlString('<span style="color:#dc2626;font-weight:600;">Bu ürün bu şubede stokta yok</span>');
-                                                            }
-                                                            return null;
-                                                        })
-                                                        ->getSearchResultsUsing(function (string $search) {
-                                                            $like = "%{$search}%";
-                                                            return Product::query()
-                                                                ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))
-                                                                ->limit(50)
-                                                                ->get()
-                                                                ->mapWithKeys(fn ($p) => [$p->id => "{$p->sku} | {$p->name}"])
-                                                                ->toArray();
-                                                        })
-                                                        ->getOptionLabelUsing(function ($value) {
-                                                            $p = Product::find($value);
-                                                            return $p ? "{$p->sku} | {$p->name}" : null;
-                                                        })
-                                                        ->reactive()
-                                                        ->afterStateUpdated(function ($state, Set $set, Get $get) {
-                                                            if (! $state) return;
+                        Section::make('Kalemler')
+                            ->schema([
+                                Repeater::make('items')
+                                    ->relationship()
+                                    ->minItems(1)
+                                    ->required()
+                                    ->defaultItems(1)
+                                    ->collapsible(false)
+                                    ->reorderable(false)
+                                    ->schema([
+                                        Grid::make(['default' => 1, 'sm' => 12, 'md' => 12, 'lg' => 12, 'xl' => 12])
+                                            // FIX 3: Use stock_snapshot (already in state) instead of a live DB call
+                                            // This removes a DB query per row per render
+                                            ->extraAttributes(function (Get $get) {
+                                                $snapshot = (int) ($get('stock_snapshot') ?? 1);
+                                                return $snapshot <= 0
+                                                    ? ['style' => 'border:1px solid #dc2626;border-radius:8px;padding:8px;']
+                                                    : [];
+                                            })
+                                            ->schema([
 
-                                                            $items = $get('../../items') ?: [];
-                                                            $count = 0;
-                                                            foreach ($items as $row) {
-                                                                if (($row['product_id'] ?? null) == $state) $count++;
-                                                            }
-                                                            if ($count > 1) {
-                                                                \Filament\Notifications\Notification::make()
-                                                                    ->title('Bu ürün zaten siparişte mevcut.')
-                                                                    ->body('Aynı ürünü birden fazla kez ekliyorsunuz. Devam etmek istediğinize emin misiniz?')
-                                                                    ->warning()
-                                                                    ->persistent()
-                                                                    ->send();
-                                                            }
+                                                ViewComponent::make('filament.components.product-thumb')
+                                                    ->viewData(function (Get $get) {
+                                                        $url = $get('image_url');
+                                                        // FIX: short-circuit if no URL
+                                                        if (! $url) return ['url' => null, 'size' => 72];
+                                                        if (! str_starts_with($url, 'http')) {
+                                                            $url = Storage::url($url);
+                                                        }
+                                                        return ['url' => $url, 'size' => 72];
+                                                    })
+                                                    ->columnSpan(['default' => 12, 'sm' => 2, 'md' => 2, 'lg' => 2, 'xl' => 2]),
 
-                                                            $p = Product::find($state);
-                                                            if (! $p) return;
+                                                Select::make('product_id')
+                                                    ->label('Ürün')
+                                                    ->required()
+                                                    ->searchable()
+                                                    ->native(false)
+                                                    ->columnSpan(['default' => 12, 'sm' => 10, 'md' => 10, 'lg' => 10, 'xl' => 10])
+                                                    // FIX 3: helperText reads stock_snapshot from state — no DB call
+                                                    ->helperText(function (Get $get) {
+                                                        $pid = $get('product_id');
+                                                        if (! $pid) return null;
+                                                        $snapshot = (int) ($get('stock_snapshot') ?? -1);
+                                                        if ($snapshot < 0) return null;
+                                                        if ($snapshot <= 0) {
+                                                            return new HtmlString('<span style="color:#dc2626;font-weight:600;">Bu ürün bu şubede stokta yok</span>');
+                                                        }
+                                                        return null;
+                                                    })
+                                                    ->getSearchResultsUsing(function (string $search) {
+                                                        $like = "%{$search}%";
+                                                        return Product::query()
+                                                            ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))
+                                                            ->limit(50)
+                                                            ->get()
+                                                            ->mapWithKeys(fn ($p) => [$p->id => "{$p->sku} | {$p->name}"])
+                                                            ->toArray();
+                                                    })
+                                                    ->getOptionLabelUsing(function ($value) {
+                                                        $p = Product::find($value);
+                                                        return $p ? "{$p->sku} | {$p->name}" : null;
+                                                    })
+                                                    // FIX: live(onBlur) instead of reactive() — critical for large repeaters
+                                                    ->live(onBlur: true)
+                                                    ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                                        if (! $state) return;
 
-                                                            $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                            $rate = (float) ($get('../../currency_rate') ?? $get('currency_rate') ?? 1);
-                                                            $unit = self::unitFromProductAndRate($p, $rate);
-                                                            $stock = (int) self::branchStock($p->id, $branchId);
-                                                            $img   = $p->image ?: null;
+                                                        $items = $get('../../items') ?: [];
+                                                        $count = 0;
+                                                        foreach ($items as $row) {
+                                                            if (($row['product_id'] ?? null) == $state) $count++;
+                                                        }
+                                                        if ($count > 1) {
+                                                            \Filament\Notifications\Notification::make()
+                                                                ->title('Bu ürün zaten siparişte mevcut.')
+                                                                ->body('Aynı ürünü birden fazla kez ekliyorsunuz. Devam etmek istediğinize emin misiniz?')
+                                                                ->warning()
+                                                                ->persistent()
+                                                                ->send();
+                                                        }
 
-                                                            $set('unit_price', $unit);
-                                                            $set('stock_snapshot', $stock);
-                                                            $set('product_name', $p->name);
-                                                            $set('sku', $p->sku);
-                                                            $set('image_url', $img);
+                                                        $p = Product::find($state);
+                                                        if (! $p) return;
 
-                                                            if ($stock <= 0) {
-                                                                \Filament\Notifications\Notification::make()
-                                                                    ->title('Bu ürün bu şubede stokta yok')
-                                                                    ->danger()->send();
-                                                            }
+                                                        $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
+                                                        $rate     = (float) ($get('../../currency_rate') ?? $get('currency_rate') ?? 1);
+                                                        $unit     = self::unitFromProductAndRate($p, $rate);
+                                                        $stock    = (int) self::branchStock($p->id, $branchId);
+                                                        $img      = $p->image ?: null;
 
-                                                            self::recalcTotals($set, $get);
-                                                        }),
+                                                        $set('unit_price',      $unit);
+                                                        $set('stock_snapshot',  $stock);
+                                                        $set('product_name',    $p->name);
+                                                        $set('sku',             $p->sku);
+                                                        $set('image_url',       $img);
 
-                                                    // ✅ NO ->live() NO ->afterStateUpdated()
-                                                    TextInput::make('qty')
-                                                        ->label('Adet')
-                                                        ->numeric()
-                                                        ->rule('integer')
-                                                        ->required()
-                                                        ->minValue(1)
-                                                        ->default(1)
-                                                        ->dehydrateStateUsing(fn ($state) => max(1, (int) ($state ?? 1)))
-                                                        ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
-                                                        ->helperText(function (Get $get) {
-                                                            $pid = $get('product_id');
-                                                            if (! $pid) return null;
-                                                            $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                            $live     = self::branchStock($pid, $branchId);
-                                                            $style    = $live > 0 ? 'color:#16a34a;font-weight:600;' : 'color:#dc2626;font-weight:600;';
-                                                            return new HtmlString("<span style=\"{$style}\">Stok (şube): {$live}</span>");
-                                                        }),
+                                                        if ($stock <= 0) {
+                                                            \Filament\Notifications\Notification::make()
+                                                                ->title('Bu ürün bu şubede stokta yok')
+                                                                ->danger()->send();
+                                                        }
 
-                                                    // ✅ NO ->live() NO ->afterStateUpdated()
-                                                    TextInput::make('unit_price')
-                                                        ->label('Birim Fiyat')
-                                                        ->numeric()
-                                                        ->required()
-                                                        ->minValue(0)
-                                                        ->default(0)
-                                                        ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6]),
+                                                        self::recalcTotals($set, $get);
+                                                    }),
 
-                                                    TextInput::make('product_name')->hidden()->dehydrated(),
-                                                    TextInput::make('sku')->hidden()->dehydrated(),
+                                                TextInput::make('qty')
+                                                    ->label('Adet')
+                                                    ->numeric()
+                                                    ->rule('integer')
+                                                    ->required()
+                                                    ->minValue(1)
+                                                    ->default(1)
+                                                    ->dehydrateStateUsing(fn ($state) => max(1, (int) ($state ?? 1)))
+                                                    ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6])
+                                                    // FIX 3: helperText reads stock_snapshot — no DB call
+                                                    ->helperText(function (Get $get) {
+                                                        $pid = $get('product_id');
+                                                        if (! $pid) return null;
+                                                        $snapshot = (int) ($get('stock_snapshot') ?? 0);
+                                                        $style    = $snapshot > 0
+                                                            ? 'color:#16a34a;font-weight:600;'
+                                                            : 'color:#dc2626;font-weight:600;';
+                                                        return new HtmlString("<span style=\"{$style}\">Stok (şube): {$snapshot}</span>");
+                                                    }),
 
-                                                    TextInput::make('stock_snapshot')->hidden()->dehydrated()
-                                                        ->afterStateHydrated(function ($state, Set $set, Get $get) {
-                                                            if ($pid = $get('product_id')) {
-                                                                $branchId = (int) ($get('../../branch_id') ?? $get('branch_id') ?? 0);
-                                                                $set('stock_snapshot', self::branchStock($pid, $branchId));
-                                                            }
-                                                        }),
+                                                TextInput::make('unit_price')
+                                                    ->label('Birim Fiyat')
+                                                    ->numeric()
+                                                    ->required()
+                                                    ->minValue(0)
+                                                    ->default(0)
+                                                    ->columnSpan(['default' => 6, 'sm' => 6, 'md' => 6, 'lg' => 6, 'xl' => 6]),
 
-                                                    TextInput::make('image_url')->hidden()->dehydrated()
-                                                        ->afterStateHydrated(function ($state, Set $set, Get $get) {
-                                                            if (!$state && ($pid = $get('product_id'))) {
-                                                                if ($img = Product::find($pid)?->image) $set('image_url', $img);
-                                                            }
-                                                        }),
-                                                ]),
-                                        ])
-                                        ->createItemButtonLabel('Kalem ekle')
-                                        ->afterStateUpdated(fn (Set $set, Get $get) => self::recalcTotals($set, $get)),
+                                                TextInput::make('product_name')->hidden()->dehydrated(),
+                                                TextInput::make('sku')->hidden()->dehydrated(),
 
-                                    // ✅ THIS IS THE ONLY THING ADDED — the JS calculator
-                                    ViewComponent::make('filament.components.order-totals-calculator'),
-                                ]),
+                                                // FIX 4: Removed afterStateHydrated DB calls from hidden fields.
+                                                // stock_snapshot is populated by:
+                                                //   (a) product_id->afterStateUpdated when user picks a product
+                                                //   (b) refreshAllItemStocksForBranch when branch changes
+                                                //   (c) afterFill in EditOrder which calls recomputeTotalsFromArray
+                                                // No extra DB call needed here on every render.
+                                                TextInput::make('stock_snapshot')
+                                                    ->hidden()
+                                                    ->dehydrated()
+                                                    ->default(0),
+
+                                                TextInput::make('image_url')
+                                                    ->hidden()
+                                                    ->dehydrated()
+                                                    ->default(null),
+                                            ]),
+                                    ])
+                                    ->createItemButtonLabel('Kalem ekle')
+                                    ->afterStateUpdated(fn (Set $set, Get $get) => self::recalcTotals($set, $get)),
+
+                                ViewComponent::make('filament.components.order-totals-calculator'),
+                            ]),
                     ])
                     ->columnSpan(2),
 
-                // RIGHT
+                // ── RIGHT ────────────────────────────────────────
                 Group::make()
                     ->schema([
                         Section::make('Toplamlar')
@@ -384,7 +419,7 @@ class OrderResource extends Resource
                                     ->label(fn (Get $get) => 'Kargo (' . (Currency::symbolFor($get('currency_code')) ?: ($get('currency_code') ?: '')) . ')')
                                     ->numeric()
                                     ->default(0)
-                                    ->reactive()
+                                    ->live(onBlur: true)
                                     ->dehydrated(true)
                                     ->afterStateHydrated(fn ($state, Set $set) => $state === null ? $set('shipping_amount', 0) : null)
                                     ->dehydrateStateUsing(fn ($state) => $state === null ? 0 : $state)
@@ -475,13 +510,34 @@ class OrderResource extends Resource
             ->columns(3);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // FIX 5: Batch stock query — ONE query for all items instead of N queries
+    // ─────────────────────────────────────────────────────────────
     protected static function refreshAllItemStocksForBranch(Set $set, Get $get, int $branchId): void
     {
         $items = $get('items') ?? [];
+        $productIds = array_values(array_filter(array_column($items, 'product_id')));
+
+        if (empty($productIds) || ! $branchId) return;
+
+        // ONE query to load all stocks for this branch
+        $stocks = ProductBranchStock::query()
+            ->where('branch_id', $branchId)
+            ->whereIn('product_id', $productIds)
+            ->pluck('stock', 'product_id');
+
+        // Populate cache so branchStock() never hits DB for these again
+        foreach ($productIds as $pid) {
+            $pid = (int) $pid;
+            $key = "{$pid}_{$branchId}";
+            self::$_stockCache[$key] = (int) ($stocks[$pid] ?? 0);
+        }
+
+        // Write into form state
         foreach ($items as $i => $row) {
             $pid = (int) ($row['product_id'] ?? 0);
             if (! $pid) continue;
-            $stock = self::branchStock($pid, $branchId);
+            $stock = self::$_stockCache["{$pid}_{$branchId}"] ?? 0;
             $set("items.{$i}.stock_snapshot", $stock);
         }
     }
@@ -499,19 +555,10 @@ class OrderResource extends Resource
         foreach ($items as $i => $row) {
             $pid = (int) ($row['product_id'] ?? 0);
             if (! $pid) continue;
-            $p = Product::find($pid);
+            $p    = Product::find($pid);
             $unit = self::unitFromProductAndRate($p, $rate);
             $set("items.{$i}.unit_price", $unit);
         }
-    }
-
-    protected static function branchStock(int $productId, ?int $branchId): int
-    {
-        if (! $productId || ! $branchId) return 0;
-        return (int) (ProductBranchStock::query()
-            ->where('product_id', $productId)
-            ->where('branch_id', $branchId)
-            ->value('stock') ?? 0);
     }
 
     protected static function fillBillingFromCustomer(Set $set, Get $get): void
@@ -529,7 +576,7 @@ class OrderResource extends Resource
         };
 
         $fillIfBlank('billing_phone',         $u->phone ?? null);
-        $fillIfBlank('billing_tax_number',    $u->tax_number ?? null); 
+        $fillIfBlank('billing_tax_number',    $u->tax_number ?? null);
         $fillIfBlank('billing_address_line1', $u->billing_address_line1 ?? null);
         $fillIfBlank('billing_address_line2', $u->billing_address_line2 ?? null);
         $fillIfBlank('billing_city',          $u->billing_city ?? null);
@@ -566,7 +613,7 @@ class OrderResource extends Resource
 
         $set('billing_name',          $u->name ?? null);
         $set('billing_phone',         $u->phone ?? null);
-        $set('billing_tax_number',    $u->tax_number ?? null); 
+        $set('billing_tax_number',    $u->tax_number ?? null);
         $set('billing_address_line1', $u->billing_address_line1 ?? null);
         $set('billing_address_line2', $u->billing_address_line2 ?? null);
         $set('billing_city',          $u->billing_city ?? null);
@@ -577,12 +624,11 @@ class OrderResource extends Resource
 
     protected static function recalcTotals(Set $set, Get $get): void
     {
-        // Try all possible paths to get items
         $items = [];
-        
+
         foreach (['items', '../items', '../../items', '../../../items'] as $path) {
             $val = $get($path);
-            if (!empty($val) && is_array($val)) {
+            if (! empty($val) && is_array($val)) {
                 $items = $val;
                 break;
             }
@@ -616,7 +662,7 @@ class OrderResource extends Resource
     {
         $isSeller = auth()->user()?->hasRole('seller') && ! auth()->user()?->hasRole('admin');
         $isDepo   = auth()->user()?->hasRole('depo') && ! auth()->user()?->hasRole('admin');
-        
+
         return $table
             ->query(fn () => Order::query()
                 ->when($isSeller, fn ($q) => $q->where('created_by_id', auth()->id()))
@@ -627,14 +673,14 @@ class OrderResource extends Resource
                     ->label('Satış Temsilcisi')
                     ->searchable()
                     ->options(fn () => User::whereHas('roles', fn ($q) => $q->where('name', 'seller'))->pluck('name', 'id'))
-                    ->visible(! $isSeller), 
+                    ->visible(! $isSeller),
 
                 Filter::make('durumlar')
                     ->label('Durum')
                     ->form([
                         Forms\Components\Toggle::make('show_kargolandi')->label('Kargolandı')->inline(false),
                         Forms\Components\Toggle::make('show_tamamlandi')->label('Tamamlandı')->inline(false)
-                        ->hidden(fn () => auth()->user()?->hasRole('depo')),
+                            ->hidden(fn () => auth()->user()?->hasRole('depo')),
                     ])
                     ->columns(2)
                     ->default([
@@ -643,8 +689,8 @@ class OrderResource extends Resource
                     ])
                     ->query(function (Builder $query, array $data): Builder {
                         $selected = [];
-                        if (!empty($data['show_kargolandi']))  $selected[] = 'kargolandi';
-                        if (!empty($data['show_tamamlandi']))  $selected[] = 'tamamlandi';
+                        if (! empty($data['show_kargolandi'])) $selected[] = 'kargolandi';
+                        if (! empty($data['show_tamamlandi'])) $selected[] = 'tamamlandi';
 
                         if (empty($selected)) {
                             return $query->whereNotIn('status', ['kargolandi', 'tamamlandi']);
@@ -653,8 +699,8 @@ class OrderResource extends Resource
                     })
                     ->indicateUsing(function (array $data): array {
                         $chips = [];
-                        if (!empty($data['show_kargolandi'])) $chips[] = 'Yalnızca: Kargolandı';
-                        if (!empty($data['show_tamamlandi'])) $chips[] = 'Yalnızca: Tamamlandı';
+                        if (! empty($data['show_kargolandi'])) $chips[] = 'Yalnızca: Kargolandı';
+                        if (! empty($data['show_tamamlandi'])) $chips[] = 'Yalnızca: Tamamlandı';
                         return $chips;
                     }),
             ])
@@ -699,23 +745,19 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('created_at')->label('Oluşturma')->since()->sortable(),
             ])
             ->actions([
-                // 👇 1. ADDED VIEW ACTION FOR ADMINS/SELLERS
                 Tables\Actions\ViewAction::make()
                     ->label('Görüntüle')
                     ->visible(function ($record) {
-                        // Show "View" if it's completed, OR if it's 'depo' and user is not depo
                         if ($record->status === 'tamamlandi') return true;
-                        if ($record->status === 'depo' && !auth()->user()?->hasRole('depo')) return true;
+                        if ($record->status === 'depo' && ! auth()->user()?->hasRole('depo')) return true;
                         return false;
                     }),
 
-                // 👇 2. RESTRICTED EDIT ACTION
                 Tables\Actions\EditAction::make()
                     ->label('Düzenle')
                     ->visible(function ($record) {
-                        // Hide "Edit" if it's completed, OR if it's 'depo' and user is not depo
                         if ($record->status === 'tamamlandi') return false;
-                        if ($record->status === 'depo' && !auth()->user()?->hasRole('depo')) return false;
+                        if ($record->status === 'depo' && ! auth()->user()?->hasRole('depo')) return false;
                         return true;
                     }),
 
@@ -725,7 +767,7 @@ class OrderResource extends Resource
                     ->button()
                     ->extraAttributes(['style' => 'background-color:#2D83B0;color:#fff'])
                     ->url(fn ($record) => route('orders.pdf', ['order' => $record, 't' => time()]), shouldOpenInNewTab: true),
-                
+
                 Tables\Actions\DeleteAction::make()
                     ->label('Sil')
                     ->icon('heroicon-o-trash')
@@ -771,8 +813,8 @@ class OrderResource extends Resource
 
                             $order->status = $data['status'];
 
-                            if (!empty($data['note'])) {
-                                if (!empty($data['overwrite_note'])) {
+                            if (! empty($data['note'])) {
+                                if (! empty($data['overwrite_note'])) {
                                     $order->notes = $data['note'];
                                 } else {
                                     $order->notes = trim(
@@ -800,7 +842,6 @@ class OrderResource extends Resource
                     ->modalHeading('Seçilen Siparişleri Sil')
                     ->modalDescription('Bu işlem geri alınamaz. Seçilen siparişleri silmek istediğinizden emin misiniz?'),
             ])
-
             ->defaultSort('id', 'desc');
     }
 
@@ -809,7 +850,7 @@ class OrderResource extends Resource
         return [
             'index'  => Pages\ListOrders::route('/'),
             'create' => Pages\CreateOrder::route('/create'),
-            'view'   => Pages\ViewOrder::route('/{record}'), // 👇 3. ADDED VIEW ROUTE
+            'view'   => Pages\ViewOrder::route('/{record}'),
             'edit'   => Pages\EditOrder::route('/{record}/edit'),
         ];
     }
@@ -825,22 +866,33 @@ class OrderResource extends Resource
     protected static function turkishProvinces(): array
     {
         return [
-            'TR01' => 'Adana','TR02' => 'Adıyaman','TR03' => 'Afyonkarahisar','TR04' => 'Ağrı','TR05' => 'Amasya',
-            'TR06' => 'Ankara','TR07' => 'Antalya','TR08' => 'Artvin','TR09' => 'Aydın','TR10' => 'Balıkesir',
-            'TR11' => 'Bilecik','TR12' => 'Bingöl','TR13' => 'Bitlis','TR14' => 'Bolu','TR15' => 'Burdur',
-            'TR16' => 'Bursa','TR17' => 'Çanakkale','TR18' => 'Çankırı','TR19' => 'Çorum','TR20' => 'Denizli',
-            'TR21' => 'Diyarbakır','TR22' => 'Edirne','TR23' => 'Elazığ','TR24' => 'Erzincan','TR25' => 'Erzurum',
-            'TR26' => 'Eskişehir','TR27' => 'Gaziantep','TR28' => 'Giresun','TR29' => 'Gümüşhane','TR30' => 'Hakkâri',
-            'TR31' => 'Hatay','TR32' => 'Isparta','TR33' => 'Mersin','TR34' => 'İstanbul','TR35' => 'İzmir',
-            'TR36' => 'Kars','TR37' => 'Kastamonu','TR38' => 'Kayseri','TR39' => 'Kırklareli','TR40' => 'Kırşehir',
-            'TR41' => 'Kocaeli','TR42' => 'Konya','TR43' => 'Kütahya','TR44' => 'Malatya','TR45' => 'Manisa',
-            'TR46' => 'Kahramanmaraş','TR47' => 'Mardin','TR48' => 'Muğla','TR49' => 'Muş','TR50' => 'Nevşehir',
-            'TR51' => 'Niğde','TR52' => 'Ordu','TR53' => 'Rize','TR54' => 'Sakarya','TR55' => 'Samsun',
-            'TR56' => 'Siirt','TR57' => 'Sinop','TR58' => 'Sivas','TR59' => 'Tekirdağ','TR60' => 'Tokat',
-            'TR61' => 'Trabzon','TR62' => 'Tunceli','TR63' => 'Şanlıurfa','TR64' => 'Uşak','TR65' => 'Van',
-            'TR66' => 'Yozgat','TR67' => 'Zonguldak','TR68' => 'Aksaray','TR69' => 'Bayburt','TR70' => 'Karaman',
-            'TR71' => 'Kırıkkale','TR72' => 'Batman','TR73' => 'Şırnak','TR74' => 'Bartın','TR75' => 'Ardahan',
-            'TR76' => 'Iğdır','TR77' => 'Yalova','TR78' => 'Karabük','TR79' => 'Kilis','TR80' => 'Osmaniye','TR81' => 'Düzce',
+            'TR01' => 'Adana',          'TR02' => 'Adıyaman',       'TR03' => 'Afyonkarahisar',
+            'TR04' => 'Ağrı',           'TR05' => 'Amasya',         'TR06' => 'Ankara',
+            'TR07' => 'Antalya',        'TR08' => 'Artvin',         'TR09' => 'Aydın',
+            'TR10' => 'Balıkesir',      'TR11' => 'Bilecik',        'TR12' => 'Bingöl',
+            'TR13' => 'Bitlis',         'TR14' => 'Bolu',           'TR15' => 'Burdur',
+            'TR16' => 'Bursa',          'TR17' => 'Çanakkale',      'TR18' => 'Çankırı',
+            'TR19' => 'Çorum',          'TR20' => 'Denizli',        'TR21' => 'Diyarbakır',
+            'TR22' => 'Edirne',         'TR23' => 'Elazığ',         'TR24' => 'Erzincan',
+            'TR25' => 'Erzurum',        'TR26' => 'Eskişehir',      'TR27' => 'Gaziantep',
+            'TR28' => 'Giresun',        'TR29' => 'Gümüşhane',      'TR30' => 'Hakkâri',
+            'TR31' => 'Hatay',          'TR32' => 'Isparta',        'TR33' => 'Mersin',
+            'TR34' => 'İstanbul',       'TR35' => 'İzmir',          'TR36' => 'Kars',
+            'TR37' => 'Kastamonu',      'TR38' => 'Kayseri',        'TR39' => 'Kırklareli',
+            'TR40' => 'Kırşehir',       'TR41' => 'Kocaeli',        'TR42' => 'Konya',
+            'TR43' => 'Kütahya',        'TR44' => 'Malatya',        'TR45' => 'Manisa',
+            'TR46' => 'Kahramanmaraş',  'TR47' => 'Mardin',         'TR48' => 'Muğla',
+            'TR49' => 'Muş',            'TR50' => 'Nevşehir',       'TR51' => 'Niğde',
+            'TR52' => 'Ordu',           'TR53' => 'Rize',           'TR54' => 'Sakarya',
+            'TR55' => 'Samsun',         'TR56' => 'Siirt',          'TR57' => 'Sinop',
+            'TR58' => 'Sivas',          'TR59' => 'Tekirdağ',       'TR60' => 'Tokat',
+            'TR61' => 'Trabzon',        'TR62' => 'Tunceli',        'TR63' => 'Şanlıurfa',
+            'TR64' => 'Uşak',           'TR65' => 'Van',            'TR66' => 'Yozgat',
+            'TR67' => 'Zonguldak',      'TR68' => 'Aksaray',        'TR69' => 'Bayburt',
+            'TR70' => 'Karaman',        'TR71' => 'Kırıkkale',      'TR72' => 'Batman',
+            'TR73' => 'Şırnak',         'TR74' => 'Bartın',         'TR75' => 'Ardahan',
+            'TR76' => 'Iğdır',          'TR77' => 'Yalova',         'TR78' => 'Karabük',
+            'TR79' => 'Kilis',          'TR80' => 'Osmaniye',       'TR81' => 'Düzce',
         ];
     }
 
@@ -871,10 +923,10 @@ class OrderResource extends Resource
 
         $payload['items'] = $items;
 
-        $shipping        = self::toFloat($payload['shipping_amount']   ?? 0);
-        $kdvPercent      = self::toFloat($payload['kdv_percent']       ?? 0);
-        $discountPercent = self::toFloat($payload['discount_percent']  ?? 0);
-        $discountAmount  = self::toFloat($payload['discount_amount']   ?? 0);
+        $shipping        = self::toFloat($payload['shipping_amount']  ?? 0);
+        $kdvPercent      = self::toFloat($payload['kdv_percent']      ?? 0);
+        $discountPercent = self::toFloat($payload['discount_percent'] ?? 0);
+        $discountAmount  = self::toFloat($payload['discount_amount']  ?? 0);
 
         $percentDiscount = round($subtotal * $discountPercent / 100, 2);
         $finalDiscount   = min(max($discountAmount, $percentDiscount), $subtotal);
@@ -919,7 +971,7 @@ class OrderResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery();
-        $user = auth()->user();
+        $user  = auth()->user();
 
         if ($user?->hasRole('admin')) {
             return $query;
