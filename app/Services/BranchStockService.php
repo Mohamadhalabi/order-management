@@ -67,13 +67,7 @@ class BranchStockService
 
             $newStock = (int) $pbs->stock - (int) $deltaQty; // delta>0 => decrease, delta<0 => increase
 
-            if ($newStock < 0) {
-                throw ValidationException::withMessages([
-                    'items' => "Yetersiz stok: Ürün #{$productId} (şube: {$branchId}). Değişiklik: {$deltaQty}, mevcut: {$pbs->stock}",
-                ]);
-            }
-
-            $pbs->stock = $newStock;
+            $pbs->stock = max(0, $newStock);
             $pbs->save();
         }
     }
