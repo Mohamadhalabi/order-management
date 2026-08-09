@@ -391,7 +391,6 @@ class OrderResource extends Resource
 
                                                 TextInput::make('image_url')
                                                     ->hidden()
-                                                    ->dehydrated()
                                                     ->default(null),
                                             ]),
                                     ])
