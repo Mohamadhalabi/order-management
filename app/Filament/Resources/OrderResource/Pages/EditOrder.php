@@ -79,39 +79,25 @@ class EditOrder extends EditRecord
     {
         $state = $this->form->getRawState();
 
-        $productIds = [];
-        if (! empty($state['items'])) {
-            $productIds = array_values(array_unique(
-                array_filter(array_column($state['items'], 'product_id'))
-            ));
-        }
+        // FIX: Batch-load stocks for all existing items on page load
+        // so the form renders without N individual DB queries
+        $branchId = (int) ($state['branch_id'] ?? 0);
+        if ($branchId && ! empty($state['items'])) {
+            $productIds = array_values(array_filter(array_column($state['items'], 'product_id')));
 
-        if (! empty($productIds)) {
-            // Thumbnails — one query for all rows
-            $products = \App\Models\Product::query()
-                ->whereIn('id', $productIds)
-                ->get(['id', 'image'])
-                ->keyBy('id');
-
-            foreach ($state['items'] as $i => $row) {
-                $pid = (int) ($row['product_id'] ?? 0);
-                if ($pid && isset($products[$pid])) {
-                    $state['items'][$i]['image_url'] = $products[$pid]->image ?: null;
-                }
-            }
-
-            // Stocks — one query for all rows
-            $branchId = (int) ($state['branch_id'] ?? 0);
-            if ($branchId) {
+            if (! empty($productIds)) {
                 $stocks = ProductBranchStock::query()
                     ->where('branch_id', $branchId)
                     ->whereIn('product_id', $productIds)
                     ->pluck('stock', 'product_id');
 
+                // Prime the cache
                 foreach ($productIds as $pid) {
-                    OrderResource::primeStockCache((int) $pid, $branchId, (int) ($stocks[$pid] ?? 0));
+                    $pid = (int) $pid;
+                    OrderResource::primeStockCache($pid, $branchId, (int) ($stocks[$pid] ?? 0));
                 }
 
+                // Write fresh stock_snapshot into each item in state
                 foreach ($state['items'] as $i => $row) {
                     $pid = (int) ($row['product_id'] ?? 0);
                     if (! $pid) continue;

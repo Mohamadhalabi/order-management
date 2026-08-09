@@ -245,6 +245,13 @@ class OrderResource extends Resource
                             ->schema([
                                 Repeater::make('items')
                                     ->relationship()
+                                    ->mutateRelationshipDataBeforeFillUsing(function (array $data): array {
+                                        $pid = (int) ($data['product_id'] ?? 0);
+                                        if ($pid) {
+                                            $data['image_url'] = Product::find($pid)?->image ?: null;
+                                        }
+                                        return $data;
+                                    })
                                     ->minItems(1)
                                     ->required()
                                     ->defaultItems(1)
